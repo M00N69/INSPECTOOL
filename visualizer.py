@@ -908,11 +908,14 @@ if st.session_state.show_detail_dialog and st.session_state.selected_inspection_
 
     if inspection_to_show:
         # Utiliser st.dialog pour une expérience modale
-        @st.dialog("Détails de l'Inspection", dismissed=lambda: st.session_state.update({'show_detail_dialog': False}))
+        # Le décorateur @st.dialog gère l'ouverture/fermeture via une fonction
+        # Correction de la callback dismissed
+        @st.dialog("Détails de l'Inspection", dismissed=lambda: setattr(st.session_state, 'show_detail_dialog', False))
         def show_detail_modal():
             render_inspection_detail(inspection_to_show) # Appeler la fonction de rendu
             if st.button("Fermer", key="close_detail_dialog_button"):
-                 st.session_state.show_detail_dialog = False
+                 # Utiliser setattr pour modifier l'état dans le callback du bouton aussi
+                 setattr(st.session_state, 'show_detail_dialog', False)
                  st.rerun() # Forcer le rerun pour fermer la modale
 
         # Appeler la fonction décorée pour effectivement afficher la modale
@@ -926,7 +929,8 @@ if st.session_state.show_detail_dialog and st.session_state.selected_inspection_
 
 # --- Affichage de la Modale Photo (déclenché depuis la vue détail) ---
 if st.session_state.show_photo_modal and st.session_state.modal_photo_list:
-    @st.dialog("Visualiseur de Photos", dismissed=lambda: st.session_state.update({'show_photo_modal': False}))
+    # Correction de la callback dismissed
+    @st.dialog("Visualiseur de Photos", dismissed=lambda: setattr(st.session_state, 'show_photo_modal', False))
     def show_photo_viewer():
         st.subheader(st.session_state.modal_photo_caption)
         current_index = st.session_state.modal_photo_index
@@ -961,7 +965,8 @@ if st.session_state.show_photo_modal and st.session_state.modal_photo_list:
 
         # Bouton Fermer la modale photo
         if st.button("Fermer", key="close_photo_modal_button"):
-            st.session_state.show_photo_modal = False
+            # Utiliser setattr pour modifier l'état dans le callback du bouton
+            setattr(st.session_state, 'show_photo_modal', False)
             st.rerun()
 
     # Appeler la fonction pour afficher la modale photo
@@ -972,3 +977,4 @@ if st.session_state.show_photo_modal and st.session_state.modal_photo_list:
 st.divider()
 st.caption("Application Visualiseur d'Inspections v1.1 (Pagination, Modale Photo) - Mode Volatile")
 st.caption("Les statuts et notes d'actions correctives sont conservés uniquement pendant cette session.")
+
