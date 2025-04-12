@@ -14,14 +14,15 @@ from typing import List, Dict, Tuple, Optional, Any, Union # Ajout pour Type Hin
 st.set_page_config(
     page_title="Visualiseur d'Inspections",
     page_icon="📊",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    layout="wide",  # Utiliser toute la largeur de la page
+    initial_sidebar_state="expanded" # Garder la sidebar ouverte par défaut
 )
 
 # --- Constantes ---
 ITEMS_PER_PAGE_AGGREGATED = 50 # Nombre d'éléments par page dans la vue agrégée
 
 # --- Initialisation de l'État de Session ---
+# Essentiel pour stocker les données entre les re-exécutions de Streamlit
 default_session_state = {
     'loaded_inspections': [], # Liste pour stocker { "inspection": Dict, "model": Dict, "filename": str }
     'corrective_actions': {}, # Dict: clé = Tuple(inspection_id, point_id), valeur = {'status': str, 'note': str}
@@ -66,7 +67,8 @@ def is_point_of_interest(result_data: Optional[Dict], point_model: Optional[Dict
     # Vérification Plage Numérique
     if point_model.get('TypeParametre') == 'Plage_Numerique' and result_value is not None:
         try:
-            value = float(result_value)
+            # Essayer de convertir en float, gérer les erreurs potentielles
+            value = float(str(result_value).replace(',','.')) # Remplacer virgule par point pour conversion
             options_str = point_model.get('OptionsParametre', '')
             if options_str:
                 options = options_str.split(';')
@@ -196,6 +198,7 @@ def prepare_aggregated_dataframe() -> pd.DataFrame:
     for idx, data in enumerate(st.session_state.loaded_inspections):
         inspection = data['inspection']
         model = data['model']
+        # filename = data['filename'] # Pas utilisé directement dans le DF agrégé
         inspection_id = inspection['id']
 
         for result in inspection.get('results', []):
@@ -214,7 +217,7 @@ def prepare_aggregated_dataframe() -> pd.DataFrame:
                 result_display = str(result_value) if result_value is not None else ''
                 if point_model and point_model.get('TypeParametre') == 'Plage_Numerique' and result_value is not None:
                      try:
-                         value_f = float(result_value)
+                         value_f = float(str(result_value).replace(',','.')) # Remplacer virgule par point
                          options_str = point_model.get('OptionsParametre', '')
                          if options_str:
                              options = options_str.split(';')
@@ -246,7 +249,8 @@ def prepare_aggregated_dataframe() -> pd.DataFrame:
 
     df = pd.DataFrame(data_for_df)
     # Assurer le type Date pour le tri
-    df['Date Insp.'] = pd.to_datetime(df['Date Insp.'])
+    if 'Date Insp.' in df.columns:
+        df['Date Insp.'] = pd.to_datetime(df['Date Insp.'])
     return df
 
 def update_corrective_actions_from_df(edited_df: pd.DataFrame) -> None:
@@ -257,8 +261,10 @@ def update_corrective_actions_from_df(edited_df: pd.DataFrame) -> None:
     Args:
         edited_df: Le DataFrame tel que retourné par st.data_editor, contenant potentiellement
                    des modifications dans les colonnes 'Statut Action' et 'Note Action'.
+                   Ce DF peut être une tranche paginée du DF complet.
     """
     updates_made = 0
+    # Colonnes nécessaires pour identifier et mettre à jour l'action
     required_cols = ['inspection_id_hidden', 'point_id_hidden', 'Statut Action', 'Note Action']
     if not all(col in edited_df.columns for col in required_cols):
         st.error("Erreur interne: Colonnes manquantes dans le DataFrame édité pour la mise à jour des actions.")
@@ -269,19 +275,22 @@ def update_corrective_actions_from_df(edited_df: pd.DataFrame) -> None:
         point_id = row['point_id_hidden']
         action_key = (inspection_id, point_id)
 
-        # Récupérer les valeurs éditées (ou actuelles si non éditées)
+        # Récupérer les valeurs potentiellement éditées
         current_status = row['Statut Action']
-        current_note = row['Note Action'] if pd.notna(row['Note Action']) else "" # Gérer les NaN potentiels
+        # Gérer les NaN potentiels si la colonne Note est laissée vide dans l'éditeur
+        current_note = row['Note Action'] if pd.notna(row['Note Action']) else ""
 
-        # Récupérer l'état précédent ou initialiser si absent
+        # Récupérer l'état précédent ou initialiser si absent (par sécurité)
         previous_action = st.session_state.corrective_actions.get(action_key, {'status': 'À traiter', 'note': ''})
 
-        # Comparer et mettre à jour si nécessaire
+        # Comparer l'état actuel avec l'état précédent stocké en session
         if previous_action['status'] != current_status or previous_action['note'] != current_note:
+            # Mettre à jour l'état de session si une différence est détectée
             st.session_state.corrective_actions[action_key] = {'status': current_status, 'note': current_note}
             updates_made += 1
 
     if updates_made > 0:
+        # Afficher une notification indiquant que des mises à jour ont été prises en compte
         st.toast(f"{updates_made} mise(s) à jour des actions correctives enregistrée(s) pour cette session.", icon="📝")
 
 def render_inspection_detail(inspection_data: Dict) -> None:
@@ -357,7 +366,7 @@ def render_inspection_detail(inspection_data: Dict) -> None:
                              try:
                                  date_str = pd.to_datetime(result_value).strftime('%d/%m/%Y %H:%M')
                                  st.markdown(f"Résultat: {date_str}")
-                             except:
+                             except Exception: # Gérer date invalide
                                  st.markdown(f"Résultat: {result_value} (date invalide?)")
                         else:
                             st.markdown(f"Résultat: {result_value}")
@@ -365,68 +374,72 @@ def render_inspection_detail(inspection_data: Dict) -> None:
                     with res_col2: # Affichage du commentaire
                         st.markdown(f"**Commentaire:** {result_data.get('comment') or 'Aucun'}")
 
-                    # Affichage des miniatures de photos
+                    # --- Affichage des miniatures de photos ---
                     photos = result_data.get('photosBase64', [])
                     if photos:
                         st.markdown("**Photos:**")
                         # Utiliser st.columns pour afficher les miniatures côte à côte
-                        # Limiter le nombre de colonnes pour éviter un affichage trop large
                         num_photos = len(photos)
-                        cols_per_row = 5 # Ajuster selon la préférence
+                        # Ajuster le nombre de colonnes en fonction du nombre de photos pour un meilleur affichage
+                        cols_per_row = min(num_photos, 5) # Max 5 miniatures par ligne
                         photo_cols = st.columns(cols_per_row)
+
                         for i, b64_string in enumerate(photos):
                             col_index = i % cols_per_row
                             with photo_cols[col_index]:
                                 try:
-                                    # Nettoyer la string base64
-                                    if ',' in b64_string:
+                                    # Nettoyer la string base64 (enlever le préfixe si présent)
+                                    if isinstance(b64_string, str) and ',' in b64_string:
                                         b64_string = b64_string.split(',')[1]
+
+                                    # Décoder et afficher la miniature
                                     img_bytes = base64.b64decode(b64_string)
-                                    # Afficher une miniature cliquable
-                                    # Utiliser un bouton avec une clé unique pour déclencher la modale
-                                    button_key = f"photo_{inspection['id']}_{point_id}_{i}"
-                                    if st.button(f"Voir Photo {i+1}", key=button_key, help="Cliquez pour agrandir"):
-                                        st.session_state.modal_photo_list = photos # Passer toutes les photos du point
-                                        st.session_state.modal_photo_index = i
+                                    st.image(img_bytes, width=100, caption=f"Photo {i+1}") # Afficher une miniature
+
+                                    # Bouton sous la miniature pour ouvrir la modale
+                                    button_key = f"view_photo_{inspection['id']}_{point_id}_{i}"
+                                    if st.button("Agrandir", key=button_key, help="Voir l'image en grand"):
+                                        st.session_state.modal_photo_list = photos # Liste des photos pour ce point
+                                        st.session_state.modal_photo_index = i # Index de la photo cliquée
                                         st.session_state.modal_photo_caption = f"Photo {i+1} - Point: {point_model.get('PointDeControle', point_id)}"
                                         st.session_state.show_photo_modal = True
-                                        st.rerun() # Forcer rerun pour ouvrir la modale photo
-                                    # Afficher une petite image sous le bouton comme aperçu
-                                    st.image(img_bytes, width=80) # Ajuster la largeur de la miniature
+                                        st.rerun() # Re-exécuter pour afficher la modale
 
                                 except Exception as img_e:
                                     st.warning(f"Photo {i+1} invalide: {img_e}")
                 else:
                     st.info("Aucun résultat enregistré pour ce point.")
-                st.divider()
+                st.divider() # Séparateur entre les points de contrôle
 
 def calculate_dashboard_metrics() -> Dict[str, Any]:
     """
     Calcule les métriques clés et prépare les DataFrames nécessaires pour
-    l'affichage du tableau de bord.
+    l'affichage du tableau de bord, basé sur les inspections chargées et
+    les actions correctives en session.
 
     Returns:
         Un dictionnaire contenant les métriques calculées et les DataFrames préparés.
+        Retourne des valeurs par défaut et des DataFrames vides si aucune inspection n'est chargée.
     """
+    # Initialisation des métriques avec des valeurs par défaut
     metrics = {
         'total_inspections': len(st.session_state.loaded_inspections),
         'total_points_of_interest': 0,
-        'total_points_checked': 0, # Points non N/A
-        'total_points_conform': 0, # Points non N/A et non 'd'intérêt'
+        'total_points_checked': 0,
+        'total_points_conform': 0,
         'action_status_counts': {'À traiter': 0, 'En cours': 0, 'Terminé': 0, 'Annulé': 0},
-        'conformity_by_category': {}, # { category: {'conform': int, 'checked': int} }
-        'non_conformity_counts_by_point': {} # { point_name: count }
+        'conformity_by_category': {},
+        'non_conformity_counts_by_point': {},
+        'category_compliance_rates_df': pd.DataFrame(columns=['Catégorie', 'Taux Conformité (%)']),
+        'top_non_conformities_df': pd.DataFrame(columns=['Point de Contrôle', 'Nombre Occurrences']),
+        'action_status_df': pd.DataFrame(columns=['Statut', 'Nombre']),
+        'overall_compliance_rate': 0.0
     }
 
     if not st.session_state.loaded_inspections:
-        # Retourner des DataFrames vides avec les bonnes colonnes si aucune donnée
-        metrics['category_compliance_rates_df'] = pd.DataFrame(columns=['Catégorie', 'Taux Conformité (%)'])
-        metrics['top_non_conformities_df'] = pd.DataFrame(columns=['Point de Contrôle', 'Nombre Occurrences'])
-        metrics['action_status_df'] = pd.DataFrame(columns=['Statut', 'Nombre'])
-        metrics['overall_compliance_rate'] = 0.0
-        return metrics
+        return metrics # Retourner les métriques initialisées si aucune donnée
 
-    # Itérer sur les inspections chargées pour calculer les métriques
+    # Itération sur les données chargées pour calculer les métriques
     for data in st.session_state.loaded_inspections:
         inspection = data['inspection']
         model = data['model']
@@ -438,54 +451,59 @@ def calculate_dashboard_metrics() -> Dict[str, Any]:
 
             point_model = next((item for item in model.get('items', []) if item.get('ID_Point') == point_id), None)
 
-            # Ignorer si le point n'est pas trouvé dans le modèle ou s'il est marqué N/A
             if not point_model or result.get('isNA', False):
-                continue
+                continue # Ignorer points non trouvés ou N/A
 
             metrics['total_points_checked'] += 1
             category = point_model.get('Categorie', 'Sans Catégorie')
 
-            # Initialiser la catégorie si elle n'existe pas
+            # Initialiser la catégorie si nécessaire
             if category not in metrics['conformity_by_category']:
                 metrics['conformity_by_category'][category] = {'conform': 0, 'checked': 0}
             metrics['conformity_by_category'][category]['checked'] += 1
 
-            # Vérifier si le point est d'intérêt
             is_poi = is_point_of_interest(result, point_model)
 
             if is_poi:
                 metrics['total_points_of_interest'] += 1
                 action_key = (inspection_id, point_id)
-                # Récupérer le statut de l'action corrective
                 status = st.session_state.corrective_actions.get(action_key, {}).get('status', 'À traiter')
                 if status in metrics['action_status_counts']:
                     metrics['action_status_counts'][status] += 1
 
-                # Compter les occurrences de non-conformité par nom de point
                 point_name = point_model.get('PointDeControle', 'N/A')
                 metrics['non_conformity_counts_by_point'][point_name] = metrics['non_conformity_counts_by_point'].get(point_name, 0) + 1
             else:
-                # Si ce n'est pas un point d'intérêt, il est considéré comme conforme
+                # Point vérifié et non 'd'intérêt' => Conforme
                 metrics['total_points_conform'] += 1
                 metrics['conformity_by_category'][category]['conform'] += 1
 
-    # Calculs finaux des taux et préparation des DataFrames pour les graphiques
-    metrics['overall_compliance_rate'] = (metrics['total_points_conform'] / metrics['total_points_checked'] * 100) if metrics['total_points_checked'] > 0 else 0.0
+    # --- Calculs finaux et préparation des DataFrames pour Plotly ---
+    if metrics['total_points_checked'] > 0:
+        metrics['overall_compliance_rate'] = (metrics['total_points_conform'] / metrics['total_points_checked'] * 100)
 
-    metrics['category_compliance_rates_df'] = pd.DataFrame([
-        {'Catégorie': name, 'Taux Conformité (%)': (data['conform'] / data['checked'] * 100) if data['checked'] > 0 else 0.0}
-        for name, data in metrics['conformity_by_category'].items()
-    ]).sort_values(by='Catégorie')
+    # Taux de conformité par catégorie
+    cat_rates_data = []
+    for name, data in metrics['conformity_by_category'].items():
+        rate = (data['conform'] / data['checked'] * 100) if data['checked'] > 0 else 0.0
+        cat_rates_data.append({'Catégorie': name, 'Taux Conformité (%)': rate})
+    if cat_rates_data:
+        metrics['category_compliance_rates_df'] = pd.DataFrame(cat_rates_data).sort_values(by='Catégorie')
 
-    metrics['top_non_conformities_df'] = pd.DataFrame(
-        metrics['non_conformity_counts_by_point'].items(), columns=['Point de Contrôle', 'Nombre Occurrences']
-    ).nlargest(5, 'Nombre Occurrences') # Utiliser nlargest pour obtenir le top 5
+    # Top 5 points non conformes
+    if metrics['non_conformity_counts_by_point']:
+        metrics['top_non_conformities_df'] = pd.DataFrame(
+            metrics['non_conformity_counts_by_point'].items(), columns=['Point de Contrôle', 'Nombre Occurrences']
+        ).nlargest(5, 'Nombre Occurrences')
 
-    metrics['action_status_df'] = pd.DataFrame(
-         metrics['action_status_counts'].items(), columns=['Statut', 'Nombre']
-     ).sort_values(by='Statut') # Trier par statut pour cohérence
+    # Répartition des statuts d'action
+    if sum(metrics['action_status_counts'].values()) > 0:
+        metrics['action_status_df'] = pd.DataFrame(
+             metrics['action_status_counts'].items(), columns=['Statut', 'Nombre']
+         ).sort_values(by='Statut')
 
     return metrics
+
 
 def prepare_export_data() -> List[Dict]:
     """
@@ -506,17 +524,22 @@ def prepare_export_data() -> List[Dict]:
     for data in inspections_to_export:
         inspection_id = data['inspection']['id']
         # Itérer sur les résultats pour ajouter les infos d'action corrective
-        for result in data['inspection'].get('results', []):
-            point_id = result.get('idPoint')
-            if not point_id: continue
-
-            action_key = (inspection_id, point_id)
-            # Ajouter les champs seulement si une action corrective existe pour ce point
-            if action_key in st.session_state.corrective_actions:
-                action_info = st.session_state.corrective_actions[action_key]
-                result['statutAction'] = action_info.get('status')
-                result['noteAction'] = action_info.get('note')
-            # Optionnel: Ne pas ajouter les champs si aucune action n'est enregistrée
+        if 'results' in data['inspection'] and isinstance(data['inspection']['results'], list):
+            for result in data['inspection']['results']:
+                # S'assurer que result est un dictionnaire et a un idPoint
+                if isinstance(result, dict) and 'idPoint' in result:
+                    point_id = result.get('idPoint')
+                    action_key = (inspection_id, point_id)
+                    # Ajouter les champs si une action corrective existe pour ce point
+                    if action_key in st.session_state.corrective_actions:
+                        action_info = st.session_state.corrective_actions[action_key]
+                        result['statutAction'] = action_info.get('status')
+                        result['noteAction'] = action_info.get('note')
+                    # Optionnel: Ne pas ajouter les champs si aucune action n'est enregistrée
+                    # ou ajouter des valeurs par défaut si nécessaire pour la structure de sortie
+                    # else:
+                    #     result['statutAction'] = None # ou 'Non applicable' etc.
+                    #     result['noteAction'] = None
 
         updated_inspections_list.append(data)
     return updated_inspections_list
@@ -530,20 +553,27 @@ def create_export_zip(export_data: List[Dict]) -> bytes:
         export_data: La liste des dictionnaires d'inspection à exporter.
 
     Returns:
-        Les bytes du fichier ZIP généré.
+        Les bytes du fichier ZIP généré, ou des bytes vides en cas d'erreur.
     """
     zip_buffer = io.BytesIO()
     try:
         with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-            # Sérialiser la liste complète en JSON
-            # Utiliser default=str pour gérer les types non sérialisables comme les dates/timestamps Pandas
-            json_string = json.dumps(export_data, indent=2, ensure_ascii=False, default=str)
-            # Ajouter ce JSON comme un fichier dans le ZIP
+            # Créer le contenu JSON, gérer les types non sérialisables comme datetime
+            def default_serializer(obj):
+                if isinstance(obj, (datetime, pd.Timestamp)):
+                    return obj.isoformat()
+                # Ajouter d'autres types si nécessaire
+                raise TypeError(f"Type {type(obj)} not serializable")
+
+            json_string = json.dumps(export_data, indent=2, ensure_ascii=False, default=default_serializer)
+            # Ajouter le fichier JSON au ZIP
             zip_file.writestr("aggregated_export.json", json_string)
     except Exception as e:
         st.error(f"Erreur lors de la création du fichier ZIP : {e}")
         return b"" # Retourner des bytes vides en cas d'erreur
 
+    # Se positionner au début du buffer avant de lire sa valeur
+    zip_buffer.seek(0)
     return zip_buffer.getvalue()
 
 # --- Interface Utilisateur Streamlit ---
@@ -565,11 +595,11 @@ with st.sidebar:
 
     # Bouton pour déclencher le traitement après sélection
     if uploaded_files:
+        # Utiliser un bouton pour que le traitement ne se fasse qu'au clic
         if st.button("Traiter les Fichiers Chargés"):
             with st.spinner("Traitement des fichiers..."):
                 load_zip_data(uploaded_files)
-            # Vider l'état de l'uploader et forcer un rerun pour rafraîchir l'UI
-            st.session_state.file_uploader = []
+            # Forcer un rerun pour rafraîchir l'interface et vider l'état visuel de l'uploader
             st.rerun()
 
     st.divider()
@@ -579,7 +609,8 @@ with st.sidebar:
         st.header("Actions Globales")
         # Bouton pour vider toutes les données
         if st.button("⚠️ Vider Toutes les Données Chargées"):
-            # Réinitialiser tous les états liés aux données chargées
+            # Demander confirmation via une modale serait plus sûr pour une action destructive
+            # Pour l'instant, action directe après clic
             st.session_state.loaded_inspections = []
             st.session_state.corrective_actions = {}
             st.session_state.selected_inspection_id_for_detail = None
@@ -618,8 +649,6 @@ with st.sidebar:
                 mime="application/zip",
                 key="download_export_button"
                 # Au clic, le téléchargement est lancé par Streamlit
-                # On pourrait réinitialiser export_data_prepared ici si on veut un seul téléchargement par préparation
-                # onClick=lambda: st.session_state.update({'export_data_prepared': None})
             )
 
 
@@ -717,7 +746,7 @@ else:
                             st.rerun() # Forcer rerun pour ouvrir la modale
 
                         if st.button("🗑️ Retirer", key=f"remove_{inspection_id}_{index}", type="secondary"):
-                            # Logique de suppression (déplacée ici pour clarté)
+                            # Logique de suppression
                             st.session_state.loaded_inspections = [insp for insp in st.session_state.loaded_inspections if insp['inspection']['id'] != inspection_id]
                             keys_to_remove = [key for key in st.session_state.corrective_actions if key[0] == inspection_id]
                             for key in keys_to_remove:
@@ -764,10 +793,10 @@ else:
             search_term_lower = search_term.lower()
             # Appliquer la recherche sur plusieurs colonnes pertinentes
             text_search_cols = ['Point de Contrôle', 'Commentaire', 'Note Action', 'Résultat Obtenu', 'Critère Accept.']
-            # S'assurer que les colonnes existent et sont de type string pour éviter les erreurs
             mask = pd.Series([False] * len(filtered_df)) # Initialiser le masque
             for col in text_search_cols:
                 if col in filtered_df.columns:
+                     # S'assurer que la colonne est de type string avant d'appliquer .str
                      mask |= filtered_df[col].astype(str).str.lower().str.contains(search_term_lower, na=False)
             filtered_df = filtered_df[mask]
 
@@ -793,15 +822,16 @@ else:
         else:
             st.markdown(f"**{total_items}** point(s) d'intérêt trouvé(s)")
 
-            # Calcul de la pagination
-            total_pages = (total_items + ITEMS_PER_PAGE_AGGREGATED - 1) // ITEMS_PER_PAGE_AGGREGATED
-            current_page = st.session_state.aggregated_page_number
-            if current_page > total_pages: # Ajuster si les filtres réduisent le nombre de pages
-                 current_page = max(1, total_pages)
-                 st.session_state.aggregated_page_number = current_page
+            # --- Logique de Pagination ---
+            total_pages = max(1, (total_items + ITEMS_PER_PAGE_AGGREGATED - 1) // ITEMS_PER_PAGE_AGGREGATED)
+            # Assurer que la page actuelle est valide
+            current_page = min(st.session_state.aggregated_page_number, total_pages)
+            st.session_state.aggregated_page_number = current_page # Mettre à jour si elle a été ajustée
 
             start_idx = (current_page - 1) * ITEMS_PER_PAGE_AGGREGATED
             end_idx = start_idx + ITEMS_PER_PAGE_AGGREGATED
+            # Sélectionner la tranche de données pour la page actuelle
+            # Utiliser .iloc pour le slicing basé sur la position entière
             paginated_df = filtered_df.iloc[start_idx:end_idx]
 
             # Afficher le data editor avec les données paginées
@@ -819,7 +849,7 @@ else:
                     "ID Insp.": st.column_config.TextColumn("ID Insp.", help="Début de l'ID de l'inspection", disabled=True),
                     "Inspecteur": st.column_config.TextColumn("Inspecteur", disabled=True),
                     "Catégorie": st.column_config.TextColumn("Catégorie", disabled=True),
-                    "Point de Contrôle": st.column_config.TextColumn("Point de Contrôle", width="medium", disabled=True),
+                    "Point de Contrôle": st.column_config.TextColumn("Point Contrôle", width="medium", disabled=True),
                     "Critère Accept.": st.column_config.TextColumn("Critère", width="small", disabled=True), # Raccourci titre
                     "Résultat Obtenu": st.column_config.TextColumn("Résultat", width="small", disabled=True), # Raccourci titre
                     "Commentaire": st.column_config.TextColumn("Commentaire", width="medium", disabled=True),
@@ -828,7 +858,7 @@ else:
                         "Statut Action",
                         help="Statut du suivi de l'action corrective",
                         options=['À traiter', 'En cours', 'Terminé', 'Annulé'],
-                        required=True
+                        required=True # Rendre obligatoire la sélection
                     ),
                     "Note Action": st.column_config.TextColumn(
                         "Note Action",
@@ -846,26 +876,29 @@ else:
                 num_rows="fixed" # Ajuster la hauteur si nécessaire, ou "dynamic"
             )
 
-            # Mettre à jour l'état si des modifications ont été faites dans la tranche affichée
-            # Comparaison robuste pour éviter les mises à jour inutiles
-            if not paginated_df.reset_index(drop=True).equals(edited_df_slice.reset_index(drop=True)):
-                 update_corrective_actions_from_df(edited_df_slice)
-                 # Pas de rerun ici pour ne pas perdre le focus de l'édition
+            # --- Mise à jour de l'état après édition ---
+            # Comparer la tranche éditée avec la tranche originale (avant édition) pour détecter les changements
+            # Il faut s'assurer que la comparaison se fait sur les mêmes index et colonnes pertinentes
+            # Note: La comparaison directe avec paginated_df peut être trompeuse si les types ont changé.
+            # Une approche plus sûre est de toujours appeler la fonction de mise à jour,
+            # qui vérifiera en interne si les valeurs ont réellement changé dans st.session_state.corrective_actions.
+            update_corrective_actions_from_df(edited_df_slice)
 
-            # Contrôles de Pagination
+            # --- Contrôles de Pagination ---
             st.divider()
             if total_pages > 1:
-                pagination_cols = st.columns([1, 2, 1])
-                with pagination_cols[0]:
-                    if st.button("⬅️ Précédent", disabled=(current_page <= 1)):
+                pagination_cols = st.columns([1, 2, 1]) # Ratio pour les boutons et le texte
+                with pagination_cols[0]: # Bouton Précédent
+                    if st.button("⬅️ Précédent", disabled=(current_page <= 1), key="agg_prev_page"):
                         st.session_state.aggregated_page_number -= 1
-                        st.rerun()
-                with pagination_cols[1]:
-                    st.write(f"Page **{current_page}** sur **{total_pages}** (Éléments {start_idx + 1} - {min(end_idx, total_items)} sur {total_items})")
-                with pagination_cols[2]:
-                    if st.button("Suivant ➡️", disabled=(current_page >= total_pages)):
+                        st.rerun() # Re-exécuter pour afficher la page précédente
+                with pagination_cols[1]: # Affichage du numéro de page
+                    st.markdown(f"<div style='text-align: center;'>Page **{current_page}** sur **{total_pages}**</div>", unsafe_allow_html=True)
+                    # st.write(f"Page **{current_page}** sur **{total_pages}** (Éléments {start_idx + 1} - {min(end_idx, total_items)} sur {total_items})") # Version plus détaillée
+                with pagination_cols[2]: # Bouton Suivant
+                    if st.button("Suivant ➡️", disabled=(current_page >= total_pages), key="agg_next_page"):
                         st.session_state.aggregated_page_number += 1
-                        st.rerun()
+                        st.rerun() # Re-exécuter pour afficher la page suivante
 
 
 # --- Affichage de la Modale de Détail (déclenché depuis l'onglet Liste) ---
@@ -875,7 +908,6 @@ if st.session_state.show_detail_dialog and st.session_state.selected_inspection_
 
     if inspection_to_show:
         # Utiliser st.dialog pour une expérience modale
-        # Le décorateur @st.dialog gère l'ouverture/fermeture via une fonction
         @st.dialog("Détails de l'Inspection", dismissed=lambda: st.session_state.update({'show_detail_dialog': False}))
         def show_detail_modal():
             render_inspection_detail(inspection_to_show) # Appeler la fonction de rendu
@@ -904,28 +936,30 @@ if st.session_state.show_photo_modal and st.session_state.modal_photo_list:
         # Afficher l'image actuelle
         try:
             b64_string = photos[current_index]
-            if ',' in b64_string:
+            # Nettoyer la string base64 (enlever le préfixe si présent)
+            if isinstance(b64_string, str) and ',' in b64_string:
                 b64_string = b64_string.split(',')[1]
             img_bytes = base64.b64decode(b64_string)
+            # Afficher l'image en utilisant la largeur de la colonne/modale
             st.image(img_bytes, use_column_width=True)
         except Exception as e:
             st.error(f"Impossible d'afficher l'image {current_index + 1}: {e}")
 
         # Ajouter la navigation si plusieurs photos
         if num_photos > 1:
-            nav_cols = st.columns([1, 2, 1])
+            nav_cols = st.columns([1, 2, 1]) # Boutons Préc/Suiv et compteur
             with nav_cols[0]:
-                if st.button("⬅️ Précédent", disabled=(current_index == 0)):
+                if st.button("⬅️ Précédent", disabled=(current_index == 0), key="prev_photo"):
                     st.session_state.modal_photo_index -= 1
-                    st.rerun()
+                    st.rerun() # Re-exécuter pour afficher la nouvelle image
             with nav_cols[1]:
                 st.write(f"Photo {current_index + 1} / {num_photos}")
             with nav_cols[2]:
-                if st.button("Suivant ➡️", disabled=(current_index == num_photos - 1)):
+                if st.button("Suivant ➡️", disabled=(current_index == num_photos - 1), key="next_photo"):
                     st.session_state.modal_photo_index += 1
-                    st.rerun()
+                    st.rerun() # Re-exécuter pour afficher la nouvelle image
 
-        # Bouton Fermer
+        # Bouton Fermer la modale photo
         if st.button("Fermer", key="close_photo_modal_button"):
             st.session_state.show_photo_modal = False
             st.rerun()
