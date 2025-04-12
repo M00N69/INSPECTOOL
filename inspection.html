@@ -1,0 +1,2048 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Application d'Inspection Qualité</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        /* Styles additionnels si nécessaire */
+        body {
+            font-family: 'Inter', sans-serif; /* Police similaire à Material Design */
+            background-color: #f4f7f6; /* Fond légèrement gris */
+        }
+        /* Style pour les modales */
+        .modal {
+            display: none; /* Caché par défaut */
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            background-color: rgba(0,0,0,0.5); /* Fond semi-transparent */
+            align-items: center;
+            justify-content: center;
+        }
+        .modal-content {
+            background-color: #fff;
+            margin: auto;
+            padding: 2rem;
+            border-radius: 0.5rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            width: 90%;
+            max-width: 500px; /* Largeur max de la modale */
+        }
+        /* Style pour les notifications (toasts) */
+        #toast-container {
+            position: fixed;
+            bottom: 1rem;
+            right: 1rem;
+            z-index: 1050;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        .toast {
+            padding: 0.75rem 1.25rem;
+            border-radius: 0.375rem;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            opacity: 0;
+            transition: opacity 0.5s ease-in-out;
+            max-width: 300px;
+        }
+        .toast.show {
+            opacity: 1;
+        }
+        .toast-success { background-color: #d1fae5; color: #065f46; }
+        .toast-error { background-color: #fee2e2; color: #991b1b; }
+        .toast-info { background-color: #dbeafe; color: #1e40af; }
+
+        /* Style pour les images prévisualisées */
+        .thumbnail-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin-top: 0.5rem;
+        }
+        .thumbnail {
+            position: relative;
+            display: inline-block;
+        }
+        .thumbnail img {
+            max-width: 80px;
+            max-height: 80px;
+            border-radius: 0.25rem;
+            border: 1px solid #ccc;
+        }
+        .thumbnail .delete-photo {
+            position: absolute;
+            top: -5px;
+            right: -5px;
+            background-color: rgba(255, 0, 0, 0.8);
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            font-size: 12px;
+            line-height: 18px;
+            text-align: center;
+            cursor: pointer;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+        }
+        /* Indicateur de chargement */
+        #loading-indicator {
+            display: none; /* Caché par défaut */
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(255, 255, 255, 0.7);
+            z-index: 2000;
+            justify-content: center;
+            align-items: center;
+        }
+        #loading-indicator i {
+            font-size: 3rem;
+            color: #3b82f6; /* Bleu Tailwind */
+        }
+        /* Style pour input[type=file] */
+        input[type="file"]::file-selector-button {
+          @apply px-4 py-2 bg-blue-500 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-opacity-75 cursor-pointer mr-4;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+
+    <header class="bg-blue-600 text-white p-4 shadow-md">
+        <h1 class="text-2xl font-bold">Application d'Inspection Qualité</h1>
+        <p class="text-sm text-blue-100">Gestion des checklists et réalisation d'inspections hors-ligne.</p>
+    </header>
+
+    <nav class="bg-white shadow-sm mb-6">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-center h-16">
+                <div class="flex space-x-8">
+                    <button id="nav-models" class="nav-button border-b-2 border-blue-500 text-blue-600 inline-flex items-center px-1 pt-1 text-sm font-medium">
+                        Gestion des Modèles
+                    </button>
+                    <button id="nav-inspections" class="nav-button border-b-2 border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 text-sm font-medium">
+                        Inspections
+                    </button>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-16">
+
+        <section id="models-section" class="space-y-6">
+            <h2 class="text-xl font-semibold text-gray-700">Gestion des Modèles de Checklists</h2>
+
+            <div class="bg-white p-6 rounded-lg shadow">
+                <h3 class="text-lg font-medium mb-4">Importer un Nouveau Modèle</h3>
+                <div class="flex items-center space-x-4">
+                    <input type="file" id="import-excel-input" accept=".xlsx" class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"/>
+                    <button id="import-excel-button" class="px-4 py-2 bg-blue-500 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-opacity-75 disabled:opacity-50" disabled>
+                        <i class="fas fa-file-import mr-2"></i>Importer
+                    </button>
+                </div>
+                 <p class="mt-2 text-xs text-gray-500">Sélectionnez un fichier Excel (.xlsx) avec les colonnes: ID_Point, Categorie, PointDeControle, Description, CritereAcceptation, TypeParametre, OptionsParametre.</p>
+            </div>
+
+            <div class="bg-white p-6 rounded-lg shadow">
+                <h3 class="text-lg font-medium mb-4">Modèles Existants</h3>
+                <div id="checklist-models-list" class="space-y-3">
+                    <p class="text-gray-500 italic">Aucun modèle trouvé. Importez un fichier Excel.</p>
+                </div>
+            </div>
+        </section>
+
+        <section id="inspections-section" class="hidden space-y-6">
+            <h2 class="text-xl font-semibold text-gray-700">Inspections</h2>
+
+             <div class="bg-white p-6 rounded-lg shadow">
+                <h3 class="text-lg font-medium mb-4">Démarrer une Nouvelle Inspection</h3>
+                <div class="space-y-4">
+                     <div>
+                        <label for="new-inspection-model" class="block text-sm font-medium text-gray-700 mb-1">Choisir un modèle :</label>
+                        <select id="new-inspection-model" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md">
+                            <option value="">Sélectionnez un modèle...</option>
+                            </select>
+                    </div>
+                     <div>
+                        <label for="inspector-name" class="block text-sm font-medium text-gray-700 mb-1">Nom de l'inspecteur :</label>
+                        <input type="text" id="inspector-name" placeholder="Entrez votre nom" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                    </div>
+                    <button id="start-inspection-button" class="w-full px-4 py-2 bg-green-500 text-white font-semibold rounded-lg shadow-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-400 focus:ring-opacity-75 disabled:opacity-50" disabled>
+                        <i class="fas fa-play mr-2"></i>Démarrer l'Inspection
+                    </button>
+                </div>
+            </div>
+
+            <div class="bg-white p-6 rounded-lg shadow">
+                <h3 class="text-lg font-medium mb-4">Inspections en Cours / Terminées</h3>
+                 <div class="flex items-center space-x-4 mb-4">
+                    <label for="import-package-input" class="text-sm font-medium text-gray-700">Importer Package:</label>
+                    <input type="file" id="import-package-input" accept=".zip" class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-purple-50 file:text-purple-700 hover:file:bg-purple-100"/>
+                    <button id="import-package-button" class="px-4 py-2 bg-purple-500 text-white font-semibold rounded-lg shadow-md hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:ring-opacity-75 disabled:opacity-50" disabled>
+                        <i class="fas fa-upload mr-2"></i>Importer
+                    </button>
+                </div>
+                <div id="inspections-list" class="space-y-3">
+                    <p class="text-gray-500 italic">Aucune inspection trouvée.</p>
+                </div>
+            </div>
+        </section>
+
+        <section id="inspection-form-section" class="hidden space-y-6">
+            <div class="flex justify-between items-center mb-4">
+                <h2 id="inspection-form-title" class="text-xl font-semibold text-gray-700">Réalisation de l'Inspection</h2>
+                <button id="back-to-inspections-list" class="px-4 py-2 bg-gray-500 text-white font-semibold rounded-lg shadow-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-opacity-75">
+                    <i class="fas fa-arrow-left mr-2"></i>Retour
+                </button>
+            </div>
+
+            <div class="bg-white p-6 rounded-lg shadow sticky top-0 z-10">
+                 <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                    <div>
+                        <p class="text-sm text-gray-600">Modèle: <span id="inspection-info-model" class="font-medium"></span></p>
+                        <p class="text-sm text-gray-600">Inspecteur: <span id="inspection-info-inspector" class="font-medium"></span></p>
+                        <p class="text-sm text-gray-600">Début: <span id="inspection-info-start" class="font-medium"></span></p>
+                    </div>
+                     <div class="flex flex-col sm:flex-row items-start sm:items-center gap-2 w-full sm:w-auto">
+                        <div class="w-full sm:w-auto">
+                            <label for="filter-category" class="block text-sm font-medium text-gray-700 mb-1">Filtrer par catégorie :</label>
+                            <select id="filter-category" class="block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md">
+                                <option value="all">Toutes les catégories</option>
+                                </select>
+                        </div>
+                        <button id="finish-inspection-button" class="w-full sm:w-auto mt-2 sm:mt-0 px-4 py-2 bg-red-500 text-white font-semibold rounded-lg shadow-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-400 focus:ring-opacity-75">
+                            <i class="fas fa-check-circle mr-2"></i>Terminer l'Inspection
+                        </button>
+                    </div>
+                </div>
+                <div class="mt-4">
+                    <label for="inspection-progress" class="block text-sm font-medium text-gray-700">Progression :</label>
+                    <div class="w-full bg-gray-200 rounded-full h-2.5 dark:bg-gray-700 mt-1">
+                        <div id="inspection-progress-bar" class="bg-blue-600 h-2.5 rounded-full" style="width: 0%"></div>
+                    </div>
+                     <p id="inspection-progress-text" class="text-sm text-gray-600 text-right mt-1">0 / 0 points traités</p>
+                </div>
+            </div>
+
+            <div id="inspection-points-container" class="space-y-4">
+                </div>
+        </section>
+
+    </main>
+
+    <div id="toast-container"></div>
+
+    <div id="generic-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <h3 id="modal-title" class="text-lg font-medium mb-4">Titre Modale</h3>
+            <p id="modal-message" class="text-sm text-gray-600 mb-6">Message de la modale.</p>
+            <div class="flex justify-end space-x-3">
+                <button id="modal-cancel-button" class="px-4 py-2 bg-gray-300 text-gray-800 font-semibold rounded-lg shadow-sm hover:bg-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-opacity-75">Annuler</button>
+                <button id="modal-confirm-button" class="px-4 py-2 bg-blue-500 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-opacity-75">Confirmer</button>
+            </div>
+        </div>
+    </div>
+
+     <div id="name-checklist-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <h3 class="text-lg font-medium mb-4">Nommer la Nouvelle Checklist</h3>
+            <p class="text-sm text-gray-600 mb-4">Entrez un nom unique pour ce modèle de checklist.</p>
+            <input type="text" id="new-checklist-name-input" placeholder="Nom de la checklist" class="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm mb-6">
+            <div class="flex justify-end space-x-3">
+                <button id="name-checklist-cancel-button" class="px-4 py-2 bg-gray-300 text-gray-800 font-semibold rounded-lg shadow-sm hover:bg-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-opacity-75">Annuler</button>
+                <button id="name-checklist-confirm-button" class="px-4 py-2 bg-blue-500 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-opacity-75">Sauvegarder</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="loading-indicator" class="fixed inset-0 bg-white bg-opacity-75 flex items-center justify-center" style="display: none; z-index: 9999;">
+        <i class="fas fa-spinner fa-spin text-blue-500 text-4xl"></i>
+        <p id="loading-message" class="ml-4 text-lg text-gray-700">Chargement...</p>
+    </div>
+
+    <footer class="fixed bottom-0 left-0 right-0 bg-yellow-100 border-t border-yellow-300 p-2 text-center text-xs text-yellow-800 z-50">
+        <i class="fas fa-exclamation-triangle mr-1"></i> Les données sont stockées localement dans votre navigateur. Vider le cache peut entraîner une perte de données. Pensez à exporter vos inspections importantes.
+        <span id="storage-estimate" class="ml-2"></span>
+    </footer>
+
+    <script>
+        // --- utils.js ---
+        const Utils = {
+            DB_NAME: 'QualityInspectionDB',
+            DB_VERSION: 1,
+            MODELS_STORE: 'ChecklistModelsStore',
+            INSPECTIONS_STORE: 'InspectionsStore',
+            MAX_IMAGE_WIDTH: 1200, // Max width for resized images
+            MAX_IMAGE_SIZE_MB: 1, // Max size in MB before trying to resize
+
+            generateUniqueId: function(prefix = 'id_') {
+                return prefix + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+            },
+
+            formatDate: function(date) {
+                if (!date) return 'N/A';
+                try {
+                    // Tente de créer une date valide, même si c'est déjà un objet Date ou une string ISO
+                    const d = new Date(date);
+                    if (isNaN(d.getTime())) return 'Date invalide'; // Vérifie si la date est valide
+                     // Format DD/MM/YYYY HH:MM
+                    return d.toLocaleString('fr-FR', {
+                        day: '2-digit',
+                        month: '2-digit',
+                        year: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                    });
+                } catch (e) {
+                    console.error("Error formatting date:", date, e);
+                    return 'Date invalide';
+                }
+            },
+
+             formatFilename: function(name) {
+                return name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+            },
+
+            // --- Image Processing ---
+            resizeAndEncodeImage: async function(file, maxWidth = Utils.MAX_IMAGE_WIDTH, quality = 0.7) {
+                return new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                        const img = new Image();
+                        img.onload = () => {
+                            let width = img.width;
+                            let height = img.height;
+
+                            // Check if resizing is needed (based on width)
+                            if (width > maxWidth) {
+                                height *= maxWidth / width;
+                                width = maxWidth;
+                            }
+
+                            const canvas = document.createElement('canvas');
+                            canvas.width = width;
+                            canvas.height = height;
+                            const ctx = canvas.getContext('2d');
+                            ctx.drawImage(img, 0, 0, width, height);
+
+                            // Get Base64 representation with specified quality
+                            const dataUrl = canvas.toDataURL(file.type, quality);
+
+                            // Optional: Check size again after compression (though Base64 is larger than binary)
+                            // const blob = Utils.dataURLtoBlob(dataUrl);
+                            // console.log(`Resized image size: ${(blob.size / 1024 / 1024).toFixed(2)} MB`);
+
+                            resolve(dataUrl);
+                        };
+                        img.onerror = reject;
+                        img.src = event.target.result; // Load image from file reader result
+                    };
+                    reader.onerror = reject;
+                    reader.readAsDataURL(file); // Read file as Data URL
+                });
+            },
+
+            // Helper to convert Data URL to Blob (useful for size check or alternative storage)
+            dataURLtoBlob: function(dataurl) {
+                var arr = dataurl.split(','), mime = arr[0].match(/:(.*?);/)[1],
+                    bstr = atob(arr[1]), n = bstr.length, u8arr = new Uint8Array(n);
+                while(n--){
+                    u8arr[n] = bstr.charCodeAt(n);
+                }
+                return new Blob([u8arr], {type:mime});
+            },
+
+
+            // --- Excel Parsing ---
+            parseExcelFile: function(file) {
+                return new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                        try {
+                            const data = event.target.result;
+                            const workbook = XLSX.read(data, { type: 'binary' });
+                            const firstSheetName = workbook.SheetNames[0];
+                            const worksheet = workbook.Sheets[firstSheetName];
+                            const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }); // Get array of arrays
+
+                            if (jsonData.length < 2) {
+                                throw new Error("Le fichier Excel est vide ou ne contient que l'en-tête.");
+                            }
+
+                            const headers = jsonData[0].map(h => h.toString().trim());
+                            const requiredHeaders = ['ID_Point', 'Categorie', 'PointDeControle', 'Description', 'CritereAcceptation', 'TypeParametre', 'OptionsParametre'];
+                            const headerMap = {};
+
+                            // Find header indices (case-insensitive)
+                            requiredHeaders.forEach(reqHeader => {
+                                const index = headers.findIndex(h => h.toLowerCase() === reqHeader.toLowerCase());
+                                if (index === -1) {
+                                    throw new Error(`Colonne manquante dans le fichier Excel : ${reqHeader}`);
+                                }
+                                headerMap[reqHeader] = index;
+                            });
+
+                            const checklistItems = [];
+                            for (let i = 1; i < jsonData.length; i++) {
+                                const row = jsonData[i];
+                                // Skip empty rows
+                                if (row.every(cell => cell === null || cell === undefined || cell.toString().trim() === '')) {
+                                    continue;
+                                }
+
+                                const item = {};
+                                let hasError = false;
+                                requiredHeaders.forEach(reqHeader => {
+                                    const cellValue = row[headerMap[reqHeader]];
+                                    item[reqHeader] = (cellValue !== null && cellValue !== undefined) ? cellValue.toString().trim() : ''; // Ensure value is string and trimmed, or empty string
+
+                                    // Basic validation based on TypeParametre
+                                    if (reqHeader === 'TypeParametre' && !['Booleen_CNC', 'Nombre_Decimal', 'Nombre_Entier', 'Texte_Libre', 'Liste_Deroulante', 'Plage_Numerique', 'Date_Heure'].includes(item[reqHeader])) {
+                                         UI.showToast(`Erreur ligne ${i + 1}: TypeParametre '${item[reqHeader]}' invalide.`, 'error');
+                                         hasError = true;
+                                    }
+                                    if (reqHeader === 'OptionsParametre') {
+                                        const type = item['TypeParametre'];
+                                        const options = item['OptionsParametre'];
+                                        if (type === 'Liste_Deroulante' && (!options || options.split(';').length < 1)) {
+                                            UI.showToast(`Erreur ligne ${i + 1}: OptionsParametre manquant ou invalide pour Liste_Deroulante (doit contenir des options séparées par ';').`, 'error');
+                                            hasError = true;
+                                        }
+                                        if (type === 'Plage_Numerique' && (!options || options.split(';').length !== 2 || options.split(';').some(isNaN))) {
+                                            UI.showToast(`Erreur ligne ${i + 1}: OptionsParametre invalide pour Plage_Numerique (doit être 'min;max', ex: '0;100').`, 'error');
+                                            hasError = true;
+                                        }
+                                    }
+                                });
+
+                                if (hasError) {
+                                    // Skip row with error after showing message
+                                    continue;
+                                }
+
+                                // Ensure ID_Point is unique within this import
+                                if (!item['ID_Point']) {
+                                     UI.showToast(`Erreur ligne ${i + 1}: ID_Point est manquant.`, 'error');
+                                     continue; // Skip row
+                                }
+                                if (checklistItems.some(existing => existing.ID_Point === item.ID_Point)) {
+                                    UI.showToast(`Erreur ligne ${i + 1}: ID_Point '${item.ID_Point}' est dupliqué dans ce fichier.`, 'error');
+                                    continue; // Skip row
+                                }
+
+
+                                checklistItems.push(item);
+                            }
+
+                             if (checklistItems.length === 0) {
+                                throw new Error("Aucun point de contrôle valide n'a été trouvé après validation.");
+                            }
+
+                            resolve(checklistItems);
+
+                        } catch (error) {
+                            console.error("Error parsing Excel file:", error);
+                            reject(error); // Forward the error
+                        }
+                    };
+                    reader.onerror = (error) => {
+                        console.error("File reading error:", error);
+                        reject(new Error("Erreur lors de la lecture du fichier."));
+                    };
+                    reader.readAsBinaryString(file); // Read as binary string for SheetJS
+                });
+            },
+
+            // --- ZIP Packaging ---
+            createZipPackage: async function(inspectionData, modelData) {
+                 UI.showLoading("Création du package...");
+                return new Promise(async (resolve, reject) => {
+                    try {
+                        const zip = new JSZip();
+                        const packageData = {
+                            inspection: inspectionData,
+                            model: modelData // Include the model structure
+                        };
+                        // Add the JSON data as a file inside the zip
+                        zip.file("inspection_data.json", JSON.stringify(packageData, null, 2)); // Pretty print JSON
+
+                        // Generate the zip file asynchronously
+                        const content = await zip.generateAsync({
+                            type: "blob",
+                            compression: "DEFLATE",
+                            compressionOptions: {
+                                level: 6 // Balance between speed and compression
+                            }
+                        });
+
+                        // Create a filename
+                        const inspectorName = Utils.formatFilename(inspectionData.inspectorName || 'inspecteur');
+                        const exportDate = new Date().toISOString().slice(0, 19).replace(/[-T:]/g, ''); // YYYYMMDD_HHMMSS
+                        const filename = `inspection_${inspectorName}_${exportDate}.zip`;
+
+                         UI.hideLoading();
+                        resolve({ blob: content, filename: filename });
+                    } catch (error) {
+                        console.error("Error creating ZIP package:", error);
+                         UI.hideLoading();
+                        reject(new Error("Erreur lors de la création du fichier ZIP."));
+                    }
+                });
+            },
+
+            extractZipPackage: function(file) {
+                 UI.showLoading("Extraction du package...");
+                return new Promise(async (resolve, reject) => {
+                    try {
+                        const zip = await JSZip.loadAsync(file);
+                        const jsonFile = zip.file("inspection_data.json");
+
+                        if (!jsonFile) {
+                            throw new Error("Le fichier 'inspection_data.json' est introuvable dans le ZIP.");
+                        }
+
+                        const jsonContent = await jsonFile.async("string");
+                        const packageData = JSON.parse(jsonContent);
+
+                        // Basic validation of the extracted data structure
+                        if (!packageData || typeof packageData !== 'object' || !packageData.inspection || !packageData.model) {
+                             throw new Error("Le contenu du fichier 'inspection_data.json' est invalide ou incomplet.");
+                        }
+                         if (!packageData.inspection.id || !packageData.inspection.modelId || !packageData.model.name || !packageData.model.items) {
+                             throw new Error("Données essentielles manquantes dans 'inspection_data.json'.");
+                         }
+
+                         UI.hideLoading();
+                        resolve(packageData); // Return the parsed {inspection, model} object
+                    } catch (error) {
+                        console.error("Error extracting ZIP package:", error);
+                         UI.hideLoading();
+                        reject(error); // Forward the error
+                    }
+                });
+            },
+
+            // --- Storage Estimation ---
+            estimateStorage: async function() {
+                if ('storage' in navigator && 'estimate' in navigator.storage) {
+                    try {
+                        const estimate = await navigator.storage.estimate();
+                        const usage = (estimate.usage / 1024 / 1024).toFixed(2);
+                        const quota = (estimate.quota / 1024 / 1024).toFixed(2);
+                        const percentage = quota > 0 ? ((estimate.usage / estimate.quota) * 100).toFixed(1) : 0;
+                        return `Stockage utilisé: ${usage} Mo / ${quota} Mo (${percentage}%)`;
+                    } catch (error) {
+                        console.warn("Could not estimate storage:", error);
+                        return "Estimation du stockage indisponible.";
+                    }
+                } else {
+                    return "API Storage Estimation non supportée.";
+                }
+            }
+        };
+
+        // --- database.js ---
+        const Database = {
+            db: null,
+
+            init: function() {
+                return new Promise((resolve, reject) => {
+                    const request = indexedDB.open(Utils.DB_NAME, Utils.DB_VERSION);
+
+                    request.onerror = (event) => {
+                        console.error("Database error:", event.target.errorCode);
+                        reject("Erreur d'ouverture de la base de données IndexedDB.");
+                    };
+
+                    request.onsuccess = (event) => {
+                        this.db = event.target.result;
+                        console.log("Database opened successfully");
+                        resolve();
+                    };
+
+                    request.onupgradeneeded = (event) => {
+                        console.log("Upgrading database...");
+                        this.db = event.target.result;
+                        // Create Checklist Models Store
+                        if (!this.db.objectStoreNames.contains(Utils.MODELS_STORE)) {
+                            console.log("Creating store:", Utils.MODELS_STORE);
+                            this.db.createObjectStore(Utils.MODELS_STORE, { keyPath: 'name' }); // Use name as unique key
+                        }
+                        // Create Inspections Store
+                        if (!this.db.objectStoreNames.contains(Utils.INSPECTIONS_STORE)) {
+                            console.log("Creating store:", Utils.INSPECTIONS_STORE);
+                            const inspectionStore = this.db.createObjectStore(Utils.INSPECTIONS_STORE, { keyPath: 'id' });
+                            // Add indexes for potential future filtering/sorting
+                             inspectionStore.createIndex('status', 'status', { unique: false });
+                             inspectionStore.createIndex('modelId', 'modelId', { unique: false });
+                             inspectionStore.createIndex('startDate', 'startDate', { unique: false });
+                        }
+                         console.log("Database upgrade complete.");
+                    };
+                });
+            },
+
+            // --- Checklist Model Operations ---
+            addOrUpdateModel: function(modelData) {
+                return new Promise((resolve, reject) => {
+                    if (!this.db) return reject("Database not initialized.");
+                    const transaction = this.db.transaction([Utils.MODELS_STORE], 'readwrite');
+                    const store = transaction.objectStore(Utils.MODELS_STORE);
+                    const request = store.put(modelData); // put handles both add and update
+
+                    request.onsuccess = () => resolve();
+                    request.onerror = (event) => {
+                        console.error("Error adding/updating model:", event.target.error);
+                        reject("Erreur lors de la sauvegarde du modèle.");
+                    };
+                });
+            },
+
+            getModel: function(modelName) {
+                return new Promise((resolve, reject) => {
+                    if (!this.db) return reject("Database not initialized.");
+                    const transaction = this.db.transaction([Utils.MODELS_STORE], 'readonly');
+                    const store = transaction.objectStore(Utils.MODELS_STORE);
+                    const request = store.get(modelName);
+
+                    request.onsuccess = (event) => resolve(event.target.result); // Returns model or undefined
+                    request.onerror = (event) => {
+                         console.error("Error getting model:", event.target.error);
+                         reject("Erreur lors de la récupération du modèle.");
+                    };
+                });
+            },
+
+            getAllModels: function() {
+                return new Promise((resolve, reject) => {
+                    if (!this.db) return reject("Database not initialized.");
+                    const transaction = this.db.transaction([Utils.MODELS_STORE], 'readonly');
+                    const store = transaction.objectStore(Utils.MODELS_STORE);
+                    const request = store.getAll(); // More efficient than openCursor for getting all
+
+                    request.onsuccess = (event) => resolve(event.target.result);
+                    request.onerror = (event) => {
+                        console.error("Error getting all models:", event.target.error);
+                        reject("Erreur lors de la récupération de tous les modèles.");
+                    };
+                });
+            },
+
+            deleteModel: function(modelName) {
+                return new Promise((resolve, reject) => {
+                    if (!this.db) return reject("Database not initialized.");
+                    const transaction = this.db.transaction([Utils.MODELS_STORE], 'readwrite');
+                    const store = transaction.objectStore(Utils.MODELS_STORE);
+                    const request = store.delete(modelName);
+
+                    request.onsuccess = () => resolve();
+                    request.onerror = (event) => {
+                        console.error("Error deleting model:", event.target.error);
+                        reject("Erreur lors de la suppression du modèle.");
+                    };
+                });
+            },
+
+             // --- Inspection Operations ---
+            addOrUpdateInspection: function(inspectionData) {
+                return new Promise((resolve, reject) => {
+                    if (!this.db) return reject("Database not initialized.");
+                    const transaction = this.db.transaction([Utils.INSPECTIONS_STORE], 'readwrite');
+                    const store = transaction.objectStore(Utils.INSPECTIONS_STORE);
+
+                    // Clean up potential large objects before storing if needed (though Base64 is stored directly here)
+                    // Example: If storing Blobs, handle them appropriately
+
+                    const request = store.put(inspectionData);
+
+                    request.onsuccess = () => resolve(inspectionData.id); // Return the id on success
+                    request.onerror = (event) => {
+                        console.error("Error adding/updating inspection:", event.target.error);
+                        // Check for QuotaExceededError specifically
+                        if (event.target.error.name === 'QuotaExceededError') {
+                            reject("Erreur de sauvegarde : L'espace de stockage local est plein. Essayez de supprimer d'anciennes inspections ou des images volumineuses.");
+                        } else {
+                            reject("Erreur lors de la sauvegarde de l'inspection.");
+                        }
+                    };
+                });
+            },
+
+            getInspection: function(inspectionId) {
+                return new Promise((resolve, reject) => {
+                    if (!this.db) return reject("Database not initialized.");
+                    const transaction = this.db.transaction([Utils.INSPECTIONS_STORE], 'readonly');
+                    const store = transaction.objectStore(Utils.INSPECTIONS_STORE);
+                    const request = store.get(inspectionId);
+
+                    request.onsuccess = (event) => resolve(event.target.result); // Returns inspection or undefined
+                    request.onerror = (event) => {
+                        console.error("Error getting inspection:", event.target.error);
+                        reject("Erreur lors de la récupération de l'inspection.");
+                    };
+                });
+            },
+
+            getAllInspections: function() {
+                return new Promise((resolve, reject) => {
+                     if (!this.db) return reject("Database not initialized.");
+                    const transaction = this.db.transaction([Utils.INSPECTIONS_STORE], 'readonly');
+                    const store = transaction.objectStore(Utils.INSPECTIONS_STORE);
+                    const request = store.getAll();
+
+                    request.onsuccess = (event) => {
+                        // Sort inspections by start date, newest first
+                        const sortedInspections = event.target.result.sort((a, b) => new Date(b.startDate) - new Date(a.startDate));
+                        resolve(sortedInspections);
+                    };
+                    request.onerror = (event) => {
+                        console.error("Error getting all inspections:", event.target.error);
+                        reject("Erreur lors de la récupération de toutes les inspections.");
+                    };
+                });
+            },
+
+            deleteInspection: function(inspectionId) {
+                return new Promise((resolve, reject) => {
+                    if (!this.db) return reject("Database not initialized.");
+                    const transaction = this.db.transaction([Utils.INSPECTIONS_STORE], 'readwrite');
+                    const store = transaction.objectStore(Utils.INSPECTIONS_STORE);
+                    const request = store.delete(inspectionId);
+
+                    request.onsuccess = () => resolve();
+                    request.onerror = (event) => {
+                        console.error("Error deleting inspection:", event.target.error);
+                        reject("Erreur lors de la suppression de l'inspection.");
+                    };
+                });
+            },
+
+            // --- Update specific fields (more efficient for auto-save) ---
+             updateInspectionResults: function(inspectionId, results) {
+                return new Promise((resolve, reject) => {
+                    if (!this.db) return reject("Database not initialized.");
+                    const transaction = this.db.transaction([Utils.INSPECTIONS_STORE], 'readwrite');
+                    const store = transaction.objectStore(Utils.INSPECTIONS_STORE);
+                    const getRequest = store.get(inspectionId);
+
+                    getRequest.onsuccess = (event) => {
+                        const inspection = event.target.result;
+                        if (inspection) {
+                            inspection.results = results; // Update the results array
+                            const updateRequest = store.put(inspection);
+                            updateRequest.onsuccess = () => resolve();
+                            updateRequest.onerror = (event) => {
+                                console.error("Error updating inspection results:", event.target.error);
+                                if (event.target.error.name === 'QuotaExceededError') {
+                                    reject("Erreur de sauvegarde : L'espace de stockage local est plein.");
+                                } else {
+                                    reject("Erreur lors de la mise à jour des résultats de l'inspection.");
+                                }
+                            };
+                        } else {
+                            reject("Inspection non trouvée pour la mise à jour.");
+                        }
+                    };
+                    getRequest.onerror = (event) => {
+                        console.error("Error getting inspection for update:", event.target.error);
+                        reject("Erreur lors de la récupération de l'inspection pour mise à jour.");
+                    };
+                });
+            }
+        };
+
+        // --- ui.js ---
+        const UI = {
+            // Element selectors
+            navButtons: document.querySelectorAll('.nav-button'),
+            modelsSection: document.getElementById('models-section'),
+            inspectionsSection: document.getElementById('inspections-section'),
+            inspectionFormSection: document.getElementById('inspection-form-section'),
+            importExcelInput: document.getElementById('import-excel-input'),
+            importExcelButton: document.getElementById('import-excel-button'),
+            checklistModelsList: document.getElementById('checklist-models-list'),
+            newInspectionModelSelect: document.getElementById('new-inspection-model'),
+            inspectorNameInput: document.getElementById('inspector-name'),
+            startInspectionButton: document.getElementById('start-inspection-button'),
+            inspectionsList: document.getElementById('inspections-list'),
+            importPackageInput: document.getElementById('import-package-input'),
+            importPackageButton: document.getElementById('import-package-button'),
+            inspectionFormTitle: document.getElementById('inspection-form-title'),
+            backToInspectionsListButton: document.getElementById('back-to-inspections-list'),
+            inspectionInfoModel: document.getElementById('inspection-info-model'),
+            inspectionInfoInspector: document.getElementById('inspection-info-inspector'),
+            inspectionInfoStart: document.getElementById('inspection-info-start'),
+            filterCategorySelect: document.getElementById('filter-category'),
+            finishInspectionButton: document.getElementById('finish-inspection-button'),
+            inspectionPointsContainer: document.getElementById('inspection-points-container'),
+            inspectionProgressBar: document.getElementById('inspection-progress-bar'),
+            inspectionProgressText: document.getElementById('inspection-progress-text'),
+            toastContainer: document.getElementById('toast-container'),
+            genericModal: document.getElementById('generic-modal'),
+            modalTitle: document.getElementById('modal-title'),
+            modalMessage: document.getElementById('modal-message'),
+            modalConfirmButton: document.getElementById('modal-confirm-button'),
+            modalCancelButton: document.getElementById('modal-cancel-button'),
+            nameChecklistModal: document.getElementById('name-checklist-modal'),
+            newChecklistNameInput: document.getElementById('new-checklist-name-input'),
+            nameChecklistConfirmButton: document.getElementById('name-checklist-confirm-button'),
+            nameChecklistCancelButton: document.getElementById('name-checklist-cancel-button'),
+            loadingIndicator: document.getElementById('loading-indicator'),
+            loadingMessage: document.getElementById('loading-message'),
+            storageEstimateSpan: document.getElementById('storage-estimate'),
+
+            // State
+            currentView: 'models', // 'models', 'inspections', 'inspection-form'
+            confirmAction: null, // Stores the function to call on modal confirm
+            cancelAction: null, // Stores the function to call on modal cancel
+
+            init: function() {
+                // Setup navigation
+                this.navButtons.forEach(button => {
+                    button.addEventListener('click', (e) => this.switchView(e.target.id.split('-')[1]));
+                });
+
+                 // Enable/disable import buttons based on file selection
+                this.importExcelInput.addEventListener('change', () => {
+                    this.importExcelButton.disabled = !this.importExcelInput.files.length;
+                });
+                this.importPackageInput.addEventListener('change', () => {
+                    this.importPackageButton.disabled = !this.importPackageInput.files.length;
+                });
+
+                 // Enable/disable start inspection button
+                this.newInspectionModelSelect.addEventListener('change', this.checkStartInspectionButtonState.bind(this));
+                this.inspectorNameInput.addEventListener('input', this.checkStartInspectionButtonState.bind(this));
+
+                // Setup modal buttons
+                this.modalConfirmButton.addEventListener('click', () => this.handleModalConfirm());
+                this.modalCancelButton.addEventListener('click', () => this.handleModalCancel());
+                this.nameChecklistConfirmButton.addEventListener('click', () => this.handleModalConfirm()); // Reuse confirm logic
+                this.nameChecklistCancelButton.addEventListener('click', () => this.handleModalCancel()); // Reuse cancel logic
+
+                // Back button from inspection form
+                this.backToInspectionsListButton.addEventListener('click', () => this.switchView('inspections'));
+
+                // Filter listener
+                this.filterCategorySelect.addEventListener('change', (e) => {
+                    const selectedCategory = e.target.value;
+                    this.filterInspectionPoints(selectedCategory);
+                });
+
+                // Initial view setup
+                this.switchView(this.currentView);
+                this.updateStorageEstimate(); // Show initial estimate
+            },
+
+            switchView: function(viewName) {
+                this.currentView = viewName;
+                // Hide all sections
+                this.modelsSection.classList.add('hidden');
+                this.inspectionsSection.classList.add('hidden');
+                this.inspectionFormSection.classList.add('hidden');
+
+                // Update nav button styles
+                this.navButtons.forEach(button => {
+                    const buttonView = button.id.split('-')[1];
+                    if (buttonView === viewName) {
+                        button.classList.remove('border-transparent', 'text-gray-500', 'hover:border-gray-300', 'hover:text-gray-700');
+                        button.classList.add('border-blue-500', 'text-blue-600');
+                    } else {
+                        button.classList.remove('border-blue-500', 'text-blue-600');
+                        button.classList.add('border-transparent', 'text-gray-500', 'hover:border-gray-300', 'hover:text-gray-700');
+                    }
+                });
+
+                // Show the selected section
+                if (viewName === 'models') {
+                    this.modelsSection.classList.remove('hidden');
+                    // Optionally refresh model list here if needed
+                    ChecklistManager.loadAndDisplayModels();
+                } else if (viewName === 'inspections') {
+                    this.inspectionsSection.classList.remove('hidden');
+                    // Refresh inspection list and model dropdown
+                    InspectionManager.loadAndDisplayInspections();
+                    ChecklistManager.populateModelDropdown(this.newInspectionModelSelect); // Update dropdown
+                } else if (viewName === 'inspection-form') {
+                    this.inspectionFormSection.classList.remove('hidden');
+                    // Data for this view is loaded when an inspection is started/continued
+                }
+                 window.scrollTo(0, 0); // Scroll to top on view change
+            },
+
+             checkStartInspectionButtonState: function() {
+                const modelSelected = this.newInspectionModelSelect.value !== '';
+                const nameEntered = this.inspectorNameInput.value.trim() !== '';
+                this.startInspectionButton.disabled = !(modelSelected && nameEntered);
+            },
+
+            // --- Display Functions ---
+            displayChecklistModels: function(models) {
+                this.checklistModelsList.innerHTML = ''; // Clear existing list
+                if (!models || models.length === 0) {
+                    this.checklistModelsList.innerHTML = '<p class="text-gray-500 italic">Aucun modèle trouvé. Importez un fichier Excel.</p>';
+                    return;
+                }
+
+                models.forEach(model => {
+                    const div = document.createElement('div');
+                    div.className = 'p-4 border border-gray-200 rounded-lg flex justify-between items-center bg-white hover:bg-gray-50 transition';
+                    div.innerHTML = `
+                        <div>
+                            <p class="font-medium text-gray-800">${model.name}</p>
+                            <p class="text-sm text-gray-500">${model.items ? model.items.length : 0} points de contrôle</p>
+                        </div>
+                        <div class="space-x-2">
+                            <button class="view-model-btn text-blue-500 hover:text-blue-700" data-model-name="${model.name}" title="Visualiser"><i class="fas fa-eye"></i></button>
+                            <button class="delete-model-btn text-red-500 hover:text-red-700" data-model-name="${model.name}" title="Supprimer"><i class="fas fa-trash-alt"></i></button>
+                            </div>
+                    `;
+                    this.checklistModelsList.appendChild(div);
+                });
+
+                 // Add event listeners after rendering
+                 this.checklistModelsList.querySelectorAll('.view-model-btn').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        const modelName = e.currentTarget.getAttribute('data-model-name');
+                        ChecklistManager.viewModel(modelName);
+                    });
+                });
+                this.checklistModelsList.querySelectorAll('.delete-model-btn').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        const modelName = e.currentTarget.getAttribute('data-model-name');
+                        ChecklistManager.confirmDeleteModel(modelName);
+                    });
+                });
+            },
+
+             displayInspections: function(inspections) {
+                this.inspectionsList.innerHTML = ''; // Clear existing list
+                if (!inspections || inspections.length === 0) {
+                    this.inspectionsList.innerHTML = '<p class="text-gray-500 italic">Aucune inspection trouvée. Démarrez-en une nouvelle ou importez un package.</p>';
+                    return;
+                }
+
+                inspections.forEach(inspection => {
+                    const div = document.createElement('div');
+                    const statusClass = inspection.status === 'Terminée' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800';
+                    const statusIcon = inspection.status === 'Terminée' ? 'fa-check-circle' : 'fa-hourglass-half';
+                    const progress = InspectionManager.calculateProgress(inspection); // Get progress info
+
+                    div.className = 'p-4 border border-gray-200 rounded-lg flex flex-col sm:flex-row justify-between items-start sm:items-center bg-white hover:bg-gray-50 transition gap-2';
+                    div.innerHTML = `
+                        <div class="flex-grow">
+                            <p class="font-medium text-gray-800">Inspection: ${inspection.modelName || inspection.modelId}</p>
+                            <p class="text-sm text-gray-500">Inspecteur: ${inspection.inspectorName || 'N/A'}</p>
+                            <p class="text-sm text-gray-500">Début: ${Utils.formatDate(inspection.startDate)}</p>
+                            <p class="text-sm text-gray-500">Fin: ${inspection.status === 'Terminée' ? Utils.formatDate(inspection.endDate) : 'En cours'}</p>
+                            <p class="text-sm text-gray-500">Progression: ${progress.percentage.toFixed(0)}% (${progress.completed}/${progress.total})</p>
+                            <span class="inline-block px-2 py-0.5 text-xs font-medium rounded-full ${statusClass} mt-1"><i class="fas ${statusIcon} mr-1"></i>${inspection.status}</span>
+                        </div>
+                        <div class="flex space-x-2 mt-2 sm:mt-0 self-end sm:self-center">
+                            ${inspection.status === 'En cours' ? `<button class="continue-inspection-btn px-3 py-1 bg-blue-500 text-white text-sm rounded hover:bg-blue-600" data-inspection-id="${inspection.id}" title="Continuer"><i class="fas fa-play"></i></button>` : ''}
+                            <button class="export-inspection-btn px-3 py-1 bg-purple-500 text-white text-sm rounded hover:bg-purple-600" data-inspection-id="${inspection.id}" title="Exporter Package"><i class="fas fa-file-export"></i></button>
+                            <button class="delete-inspection-btn px-3 py-1 bg-red-500 text-white text-sm rounded hover:bg-red-600" data-inspection-id="${inspection.id}" title="Supprimer"><i class="fas fa-trash-alt"></i></button>
+                        </div>
+                    `;
+                    this.inspectionsList.appendChild(div);
+                });
+
+                 // Add event listeners
+                 this.inspectionsList.querySelectorAll('.continue-inspection-btn').forEach(btn => {
+                    btn.addEventListener('click', (e) => InspectionManager.continueInspection(e.currentTarget.getAttribute('data-inspection-id')));
+                });
+                this.inspectionsList.querySelectorAll('.export-inspection-btn').forEach(btn => {
+                    btn.addEventListener('click', (e) => InspectionManager.exportInspection(e.currentTarget.getAttribute('data-inspection-id')));
+                });
+                this.inspectionsList.querySelectorAll('.delete-inspection-btn').forEach(btn => {
+                    btn.addEventListener('click', (e) => InspectionManager.confirmDeleteInspection(e.currentTarget.getAttribute('data-inspection-id')));
+                });
+            },
+
+             displayInspectionForm: function(inspection, model) {
+                if (!inspection || !model || !model.items) {
+                    this.showToast("Erreur: Impossible de charger les données de l'inspection ou du modèle.", 'error');
+                    this.switchView('inspections');
+                    return;
+                }
+
+                // Update header info
+                this.inspectionFormTitle.textContent = `Inspection: ${model.name}`;
+                this.inspectionInfoModel.textContent = model.name;
+                this.inspectionInfoInspector.textContent = inspection.inspectorName;
+                this.inspectionInfoStart.textContent = Utils.formatDate(inspection.startDate);
+
+                // Populate category filter
+                this.filterCategorySelect.innerHTML = '<option value="all">Toutes les catégories</option>';
+                const categories = [...new Set(model.items.map(item => item.Categorie))]; // Get unique categories
+                categories.sort().forEach(category => {
+                    const option = document.createElement('option');
+                    option.value = category;
+                    option.textContent = category;
+                    this.filterCategorySelect.appendChild(option);
+                });
+                this.filterCategorySelect.value = 'all'; // Reset filter
+
+                // Render inspection points
+                this.inspectionPointsContainer.innerHTML = ''; // Clear previous points
+                model.items.forEach(item => {
+                    const pointResult = inspection.results?.find(r => r.idPoint === item.ID_Point) || { idPoint: item.ID_Point, result: null, comment: '', photosBase64: [], isNA: false };
+                    const pointElement = this.createInspectionPointElement(item, pointResult);
+                    this.inspectionPointsContainer.appendChild(pointElement);
+                });
+
+                // Update progress bar
+                this.updateInspectionProgress(inspection);
+
+                // Attach listener for finishing inspection
+                 // Remove previous listener to avoid duplicates if the form is reloaded
+                const finishBtnClone = this.finishInspectionButton.cloneNode(true);
+                this.finishInspectionButton.parentNode.replaceChild(finishBtnClone, this.finishInspectionButton);
+                this.finishInspectionButton = finishBtnClone; // Update reference
+                this.finishInspectionButton.addEventListener('click', () => InspectionManager.confirmFinishInspection(inspection.id));
+
+
+                // Switch view
+                this.switchView('inspection-form');
+            },
+
+             createInspectionPointElement: function(item, resultData) {
+                const div = document.createElement('div');
+                div.className = 'inspection-point p-5 border border-gray-200 rounded-lg bg-white shadow-sm';
+                div.dataset.category = item.Categorie; // For filtering
+                div.dataset.pointId = item.ID_Point;
+
+                let inputHtml = '';
+                const isNA = resultData.isNA || false;
+                const isDisabled = isNA ? 'disabled' : '';
+                const inputValue = resultData.result !== null && resultData.result !== undefined ? resultData.result : '';
+
+                switch (item.TypeParametre) {
+                    case 'Booleen_CNC':
+                        inputHtml = `
+                            <div class="flex space-x-3 mt-2">
+                                <button class="result-btn cnc-btn px-4 py-2 rounded ${inputValue === 'Conforme' ? 'bg-green-500 text-white' : 'bg-gray-200 text-gray-700'} hover:bg-green-300 ${isDisabled}" data-value="Conforme" ${isDisabled}>Conforme</button>
+                                <button class="result-btn cnc-btn px-4 py-2 rounded ${inputValue === 'Non Conforme' ? 'bg-red-500 text-white' : 'bg-gray-200 text-gray-700'} hover:bg-red-300 ${isDisabled}" data-value="Non Conforme" ${isDisabled}>Non Conforme</button>
+                            </div>`;
+                        break;
+                    case 'Nombre_Decimal':
+                    case 'Nombre_Entier':
+                        const step = item.TypeParametre === 'Nombre_Decimal' ? '0.01' : '1';
+                        const unit = item.OptionsParametre?.startsWith('Unité:') ? item.OptionsParametre.substring(6) : '';
+                        inputHtml = `<input type="number" step="${step}" value="${inputValue}" class="result-input mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm ${isDisabled ? 'bg-gray-100' : ''}" placeholder="${unit ? 'Valeur ('+unit+')' : 'Entrez un nombre'}" ${isDisabled}>`;
+                         if (unit) inputHtml += `<span class="text-sm text-gray-500 ml-2">${unit}</span>`;
+                        break;
+                    case 'Texte_Libre':
+                        inputHtml = `<textarea class="result-input mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm ${isDisabled ? 'bg-gray-100' : ''}" rows="2" placeholder="Entrez du texte" ${isDisabled}>${inputValue}</textarea>`;
+                        break;
+                    case 'Liste_Deroulante':
+                        const options = item.OptionsParametre.split(';').map(opt => opt.trim());
+                         let optionsHtml = '<option value="">Sélectionnez...</option>';
+                        options.forEach(opt => {
+                            optionsHtml += `<option value="${opt}" ${inputValue === opt ? 'selected' : ''}>${opt}</option>`;
+                        });
+                        inputHtml = `<select class="result-input mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md ${isDisabled ? 'bg-gray-100' : ''}" ${isDisabled}>${optionsHtml}</select>`;
+                        break;
+                    case 'Plage_Numerique':
+                        const range = item.OptionsParametre.split(';').map(Number);
+                        const min = range[0];
+                        const max = range[1];
+                        const isOutOfRange = (inputValue !== '' && (inputValue < min || inputValue > max));
+                        inputHtml = `
+                            <input type="number" value="${inputValue}" class="result-input mt-1 block w-full px-3 py-2 border ${isOutOfRange ? 'border-red-500' : 'border-gray-300'} rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm ${isDisabled ? 'bg-gray-100' : ''}" placeholder="Valeur entre ${min} et ${max}" data-min="${min}" data-max="${max}" ${isDisabled}>
+                            <p class="text-xs text-gray-500 mt-1">Plage attendue : ${min} - ${max}${isOutOfRange ? '<span class="text-red-600 font-semibold ml-2"> (Hors plage !)</span>' : ''}</p>`;
+                        break;
+                    case 'Date_Heure':
+                        // Format value for datetime-local input: YYYY-MM-DDTHH:mm
+                        let formattedDateTime = '';
+                        if (inputValue) {
+                            try {
+                                const d = new Date(inputValue);
+                                if (!isNaN(d.getTime())) {
+                                    // Pad month, day, hour, minute with leading zeros if needed
+                                    const pad = (num) => num.toString().padStart(2, '0');
+                                    formattedDateTime = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+                                }
+                            } catch (e) { console.warn("Could not format date for input:", inputValue); }
+                        }
+                        inputHtml = `<input type="datetime-local" value="${formattedDateTime}" class="result-input mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm ${isDisabled ? 'bg-gray-100' : ''}" ${isDisabled}>`;
+                        break;
+                    default:
+                        inputHtml = `<p class="text-red-500">Type de paramètre inconnu: ${item.TypeParametre}</p>`;
+                }
+
+                div.innerHTML = `
+                    <div class="flex justify-between items-start mb-2">
+                        <div>
+                            <p class="text-xs text-gray-500 uppercase">${item.Categorie}</p>
+                            <h4 class="font-semibold text-gray-800">${item.PointDeControle} <span class="text-sm font-normal text-gray-600">(ID: ${item.ID_Point})</span></h4>
+                        </div>
+                         <div class="flex items-center">
+                             <label for="na-checkbox-${item.ID_Point}" class="text-sm text-gray-600 mr-2">N/A:</label>
+                             <input type="checkbox" id="na-checkbox-${item.ID_Point}" class="na-checkbox h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500" ${isNA ? 'checked' : ''}>
+                         </div>
+                    </div>
+                    <p class="text-sm text-gray-600 mb-1"><strong class="font-medium">Description:</strong> ${item.Description || 'N/A'}</p>
+                    <p class="text-sm text-gray-600 mb-3"><strong class="font-medium">Critère d'acceptation:</strong> ${item.CritereAcceptation || 'N/A'}</p>
+
+                    <div class="mb-3">
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Résultat :</label>
+                        ${inputHtml}
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="comment-${item.ID_Point}" class="block text-sm font-medium text-gray-700 mb-1">Commentaire (optionnel) :</label>
+                        <textarea id="comment-${item.ID_Point}" class="comment-textarea mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm" rows="2" placeholder="Ajouter un commentaire...">${resultData.comment || ''}</textarea>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Photos :</label>
+                         <div class="flex items-center space-x-2">
+                            <input type="file" id="photo-input-${item.ID_Point}" class="photo-input hidden" accept="image/*" multiple>
+                            <button class="add-photo-btn px-3 py-1 bg-blue-100 text-blue-700 text-sm rounded hover:bg-blue-200" data-target-input="photo-input-${item.ID_Point}">
+                                <i class="fas fa-camera mr-1"></i> Ajouter Photo(s)
+                            </button>
+                             </div>
+                        <div id="photo-preview-${item.ID_Point}" class="thumbnail-container mt-3">
+                            </div>
+                    </div>
+                `;
+
+                 // Render existing photos
+                const previewContainer = div.querySelector(`#photo-preview-${item.ID_Point}`);
+                resultData.photosBase64?.forEach((base64, index) => {
+                    this.addPhotoThumbnail(previewContainer, base64, index);
+                });
+
+                 // Add event listeners for this specific point
+                 this.addPointEventListeners(div, item.TypeParametre);
+
+
+                return div;
+            },
+
+             addPointEventListeners: function(pointElement, typeParametre) {
+                const pointId = pointElement.dataset.pointId;
+
+                // N/A Checkbox
+                const naCheckbox = pointElement.querySelector('.na-checkbox');
+                naCheckbox.addEventListener('change', (e) => {
+                    InspectionManager.handleNAChange(pointId, e.target.checked);
+                    // Disable/enable inputs visually
+                    const isChecked = e.target.checked;
+                    pointElement.querySelectorAll('.result-input, .result-btn, .comment-textarea, .add-photo-btn, .take-photo-btn').forEach(el => {
+                        el.disabled = isChecked;
+                         if (isChecked) el.classList.add('bg-gray-100', 'opacity-70', 'cursor-not-allowed');
+                         else el.classList.remove('bg-gray-100', 'opacity-70', 'cursor-not-allowed');
+                    });
+                     // Special handling for CNC buttons styling
+                    if (typeParametre === 'Booleen_CNC') {
+                         pointElement.querySelectorAll('.cnc-btn').forEach(btn => {
+                            if (isChecked) {
+                                btn.classList.remove('bg-green-500', 'bg-red-500', 'text-white');
+                                btn.classList.add('bg-gray-200', 'text-gray-700');
+                            }
+                            // On uncheck, the state will be handled by the regular input change
+                        });
+                    }
+                });
+
+                // Result Inputs (using event delegation might be better, but direct for now)
+                if (typeParametre === 'Booleen_CNC') {
+                    pointElement.querySelectorAll('.cnc-btn').forEach(button => {
+                        button.addEventListener('click', (e) => {
+                            if (naCheckbox.checked) return; // Do nothing if N/A
+                            const value = e.target.dataset.value;
+                            InspectionManager.handleInputChange(pointId, value);
+                            // Update button styles
+                            pointElement.querySelectorAll('.cnc-btn').forEach(btn => {
+                                btn.classList.remove('bg-green-500', 'bg-red-500', 'text-white');
+                                btn.classList.add('bg-gray-200', 'text-gray-700');
+                            });
+                            e.target.classList.remove('bg-gray-200', 'text-gray-700');
+                            if (value === 'Conforme') e.target.classList.add('bg-green-500', 'text-white');
+                            else e.target.classList.add('bg-red-500', 'text-white');
+                        });
+                    });
+                } else {
+                    pointElement.querySelectorAll('.result-input').forEach(input => {
+                        input.addEventListener('change', (e) => {
+                             if (naCheckbox.checked) return;
+                             let value = e.target.value;
+                             // Special handling for datetime-local to store as ISO string
+                             if (e.target.type === 'datetime-local' && value) {
+                                try {
+                                    value = new Date(value).toISOString();
+                                } catch { value = null; } // Store null if date is invalid
+                             }
+                            InspectionManager.handleInputChange(pointId, value);
+
+                            // Validation for number range
+                            if (e.target.type === 'number' && e.target.dataset.min !== undefined) {
+                                const min = parseFloat(e.target.dataset.min);
+                                const max = parseFloat(e.target.dataset.max);
+                                const numValue = parseFloat(value);
+                                const parentDiv = e.target.closest('.inspection-point');
+                                const rangeText = parentDiv.querySelector('p.text-xs');
+                                if (value !== '' && (numValue < min || numValue > max)) {
+                                    e.target.classList.add('border-red-500');
+                                    if (rangeText && !rangeText.querySelector('.text-red-600')) {
+                                        rangeText.insertAdjacentHTML('beforeend', '<span class="text-red-600 font-semibold ml-2"> (Hors plage !)</span>');
+                                    }
+                                } else {
+                                    e.target.classList.remove('border-red-500');
+                                     const errorSpan = rangeText?.querySelector('.text-red-600');
+                                     if (errorSpan) errorSpan.remove();
+                                }
+                            }
+                        });
+                    });
+                }
+
+                // Comment Textarea
+                pointElement.querySelector('.comment-textarea').addEventListener('change', (e) => {
+                    InspectionManager.handleCommentChange(pointId, e.target.value);
+                });
+
+                 // Photo Buttons & Input
+                pointElement.querySelector('.add-photo-btn').addEventListener('click', (e) => {
+                     if (naCheckbox.checked) return;
+                    const inputId = e.target.dataset.targetInput;
+                    document.getElementById(inputId).click();
+                });
+                // Optional: Camera button listener
+                // pointElement.querySelector('.take-photo-btn')?.addEventListener('click', (e) => {
+                //     if (naCheckbox.checked) return;
+                //     const inputId = e.target.dataset.targetInput;
+                //     document.getElementById(inputId).click();
+                // });
+
+                const photoInput = pointElement.querySelector('.photo-input');
+                // const cameraInput = pointElement.querySelector('.camera-input');
+
+                const handleFileSelect = (event) => {
+                     if (naCheckbox.checked) return;
+                    const files = event.target.files;
+                    if (files.length > 0) {
+                         const previewContainer = pointElement.querySelector(`#photo-preview-${pointId}`);
+                        InspectionManager.handlePhotoAdd(pointId, files, previewContainer);
+                    }
+                     event.target.value = null; // Reset input to allow selecting the same file again
+                };
+
+                photoInput.addEventListener('change', handleFileSelect);
+                // cameraInput?.addEventListener('change', handleFileSelect);
+
+                 // Listener for deleting photos (event delegation on the container)
+                 const previewContainer = pointElement.querySelector(`#photo-preview-${pointId}`);
+                 previewContainer.addEventListener('click', (e) => {
+                     if (e.target.classList.contains('delete-photo')) {
+                         const index = parseInt(e.target.dataset.index, 10);
+                         InspectionManager.handlePhotoDelete(pointId, index, previewContainer);
+                     }
+                 });
+            },
+
+             addPhotoThumbnail: function(previewContainer, base64Data, index) {
+                 const thumbDiv = document.createElement('div');
+                 thumbDiv.className = 'thumbnail';
+                 thumbDiv.innerHTML = `
+                     <img src="${base64Data}" alt="Photo ${index + 1}">
+                     <button class="delete-photo" data-index="${index}" title="Supprimer cette photo">&times;</button>
+                 `;
+                 previewContainer.appendChild(thumbDiv);
+            },
+
+             removePhotoThumbnail: function(previewContainer, index) {
+                const thumbToRemove = previewContainer.querySelector(`.delete-photo[data-index="${index}"]`)?.closest('.thumbnail');
+                 if (thumbToRemove) {
+                     thumbToRemove.remove();
+                     // Re-index subsequent delete buttons
+                     previewContainer.querySelectorAll('.delete-photo').forEach((btn, newIndex) => {
+                         btn.dataset.index = newIndex;
+                         btn.previousElementSibling.alt = `Photo ${newIndex + 1}`; // Update alt text too
+                     });
+                 }
+            },
+
+             filterInspectionPoints: function(category) {
+                const points = this.inspectionPointsContainer.querySelectorAll('.inspection-point');
+                points.forEach(point => {
+                    if (category === 'all' || point.dataset.category === category) {
+                        point.style.display = 'block';
+                    } else {
+                        point.style.display = 'none';
+                    }
+                });
+            },
+
+             updateInspectionProgress: function(inspection) {
+                 const progress = InspectionManager.calculateProgress(inspection);
+                 this.inspectionProgressBar.style.width = `${progress.percentage}%`;
+                 this.inspectionProgressText.textContent = `${progress.completed} / ${progress.total} points traités (${progress.percentage.toFixed(0)}%)`;
+            },
+
+            // --- User Feedback ---
+            showToast: function(message, type = 'info', duration = 3000) {
+                const toast = document.createElement('div');
+                toast.className = `toast toast-${type}`;
+                toast.textContent = message;
+                this.toastContainer.appendChild(toast);
+
+                // Trigger reflow to enable animation
+                toast.offsetHeight;
+
+                toast.classList.add('show');
+
+                setTimeout(() => {
+                    toast.classList.remove('show');
+                    setTimeout(() => {
+                        toast.remove();
+                    }, 500); // Wait for fade out transition
+                }, duration);
+            },
+
+            showModal: function(title, message, confirmCallback, cancelCallback = null, confirmText = 'Confirmer', cancelText = 'Annuler') {
+                this.modalTitle.textContent = title;
+                this.modalMessage.innerHTML = message; // Use innerHTML to allow basic formatting if needed
+                this.modalConfirmButton.textContent = confirmText;
+                this.modalCancelButton.textContent = cancelText;
+
+                this.confirmAction = confirmCallback;
+                this.cancelAction = cancelCallback;
+
+                this.genericModal.style.display = 'flex';
+            },
+
+            hideModal: function() {
+                this.genericModal.style.display = 'none';
+                this.confirmAction = null;
+                this.cancelAction = null;
+            },
+
+             showNameChecklistModal: function(confirmCallback, cancelCallback = null) {
+                 this.newChecklistNameInput.value = ''; // Clear previous input
+                 this.confirmAction = () => {
+                     const name = this.newChecklistNameInput.value.trim();
+                     if (name) {
+                         confirmCallback(name); // Pass the name to the callback
+                         this.hideNameChecklistModal();
+                     } else {
+                         this.showToast("Veuillez entrer un nom pour la checklist.", "error");
+                     }
+                 };
+                 this.cancelAction = cancelCallback;
+                 this.nameChecklistModal.style.display = 'flex';
+                 this.newChecklistNameInput.focus();
+            },
+
+             hideNameChecklistModal: function() {
+                this.nameChecklistModal.style.display = 'none';
+                this.confirmAction = null;
+                this.cancelAction = null;
+            },
+
+            handleModalConfirm: function() {
+                if (typeof this.confirmAction === 'function') {
+                    this.confirmAction(); // Execute the stored confirm action
+                }
+                // Modals are hidden within their respective show*Modal functions after confirm logic
+            },
+
+            handleModalCancel: function() {
+                if (typeof this.cancelAction === 'function') {
+                    this.cancelAction(); // Execute the stored cancel action
+                }
+                this.hideModal(); // Hide generic modal
+                this.hideNameChecklistModal(); // Hide name modal
+            },
+
+            showLoading: function(message = "Chargement...") {
+                this.loadingMessage.textContent = message;
+                this.loadingIndicator.style.display = 'flex';
+            },
+
+            hideLoading: function() {
+                this.loadingIndicator.style.display = 'none';
+            },
+
+             updateStorageEstimate: async function() {
+                const estimateText = await Utils.estimateStorage();
+                this.storageEstimateSpan.textContent = `(${estimateText})`;
+            }
+
+        };
+
+        // --- checklistManager.js ---
+        const ChecklistManager = {
+            parsedChecklistData: null, // Temporarily store parsed data before naming
+
+            init: function() {
+                // Add event listeners specific to checklist management
+                UI.importExcelButton.addEventListener('click', this.handleImportExcel.bind(this));
+            },
+
+            handleImportExcel: async function() {
+                const file = UI.importExcelInput.files[0];
+                if (!file) {
+                    UI.showToast("Veuillez sélectionner un fichier Excel.", "error");
+                    return;
+                }
+
+                UI.showLoading("Lecture du fichier Excel...");
+                try {
+                    this.parsedChecklistData = await Utils.parseExcelFile(file);
+                    UI.hideLoading();
+                    if (this.parsedChecklistData && this.parsedChecklistData.length > 0) {
+                         // Ask for checklist name
+                         UI.showNameChecklistModal(
+                            (name) => this.saveImportedChecklist(name), // On Confirm
+                            () => { // On Cancel
+                                this.parsedChecklistData = null; // Clear parsed data
+                                UI.showToast("Importation annulée.", "info");
+                            }
+                        );
+                    } else {
+                        // Error messages handled within parseExcelFile using UI.showToast
+                        this.parsedChecklistData = null; // Clear potentially empty data
+                         UI.hideLoading(); // Ensure loading is hidden
+                    }
+                } catch (error) {
+                    UI.hideLoading();
+                    UI.showToast(`Erreur lors de l'import: ${error.message}`, "error");
+                    console.error("Import Error:", error);
+                    this.parsedChecklistData = null; // Clear data on error
+                } finally {
+                     // Reset file input so the same file can be selected again if needed
+                    UI.importExcelInput.value = null;
+                    UI.importExcelButton.disabled = true;
+                }
+            },
+
+             saveImportedChecklist: async function(name) {
+                if (!this.parsedChecklistData || !name) {
+                    UI.showToast("Données de checklist ou nom manquant.", "error");
+                    return;
+                }
+
+                 UI.showLoading("Vérification et sauvegarde du modèle...");
+                try {
+                    const existingModel = await Database.getModel(name);
+                    const modelData = {
+                        name: name,
+                        items: this.parsedChecklistData
+                    };
+
+                    if (existingModel) {
+                         UI.hideLoading(); // Hide loading before showing modal
+                        // Model exists, ask for confirmation to replace
+                        UI.showModal(
+                            "Modèle Existant",
+                            `Un modèle nommé "${name}" existe déjà. Voulez-vous le remplacer ?`,
+                            async () => { // On Confirm Replace
+                                UI.showLoading("Remplacement du modèle...");
+                                try {
+                                    await Database.addOrUpdateModel(modelData);
+                                    UI.hideLoading();
+                                    UI.showToast(`Modèle "${name}" remplacé avec succès.`, "success");
+                                    this.parsedChecklistData = null; // Clear temp data
+                                    this.loadAndDisplayModels(); // Refresh list
+                                    this.populateModelDropdown(UI.newInspectionModelSelect); // Refresh dropdown in inspection section
+                                } catch (dbError) {
+                                    UI.hideLoading();
+                                    UI.showToast(`Erreur lors du remplacement: ${dbError}`, "error");
+                                } finally {
+                                     UI.hideModal();
+                                }
+                            },
+                            () => { // On Cancel Replace
+                                UI.showToast("Remplacement annulé.", "info");
+                                this.parsedChecklistData = null; // Clear temp data
+                                UI.hideModal();
+                            },
+                            "Remplacer", // Confirm button text
+                            "Annuler" // Cancel button text
+                        );
+                    } else {
+                        // Model does not exist, save it directly
+                        await Database.addOrUpdateModel(modelData);
+                        UI.hideLoading();
+                        UI.showToast(`Nouveau modèle "${name}" importé avec succès.`, "success");
+                        this.parsedChecklistData = null; // Clear temp data
+                        this.loadAndDisplayModels(); // Refresh list
+                        this.populateModelDropdown(UI.newInspectionModelSelect); // Refresh dropdown
+                    }
+                } catch (error) {
+                    UI.hideLoading();
+                    UI.showToast(`Erreur lors de la sauvegarde: ${error}`, "error");
+                    this.parsedChecklistData = null; // Clear temp data
+                }
+            },
+
+             loadAndDisplayModels: async function() {
+                try {
+                    const models = await Database.getAllModels();
+                    UI.displayChecklistModels(models);
+                } catch (error) {
+                    UI.showToast(`Erreur chargement modèles: ${error}`, "error");
+                    UI.displayChecklistModels([]); // Display empty state
+                }
+            },
+
+             populateModelDropdown: async function(selectElement) {
+                 if (!selectElement) return;
+                 const currentValue = selectElement.value; // Preserve selection if possible
+                 selectElement.innerHTML = '<option value="">Sélectionnez un modèle...</option>'; // Reset
+                 try {
+                    const models = await Database.getAllModels();
+                    models.sort((a, b) => a.name.localeCompare(b.name)).forEach(model => {
+                        const option = document.createElement('option');
+                        option.value = model.name; // Use name as value, could also use an ID if models had one
+                        option.textContent = model.name;
+                        selectElement.appendChild(option);
+                    });
+                     // Restore previous selection if it still exists
+                    if (selectElement.querySelector(`option[value="${currentValue}"]`)) {
+                        selectElement.value = currentValue;
+                    }
+                     UI.checkStartInspectionButtonState(); // Update button state after populating
+                 } catch (error) {
+                     UI.showToast(`Erreur chargement modèles pour dropdown: ${error}`, "error");
+                 }
+            },
+
+            confirmDeleteModel: function(modelName) {
+                UI.showModal(
+                    "Confirmer Suppression",
+                    `Êtes-vous sûr de vouloir supprimer le modèle "${modelName}" ? Cette action est irréversible.`,
+                    async () => { // On Confirm Delete
+                         UI.showLoading("Suppression du modèle...");
+                        try {
+                            await Database.deleteModel(modelName);
+                             UI.hideLoading();
+                            UI.showToast(`Modèle "${modelName}" supprimé.`, "success");
+                            this.loadAndDisplayModels(); // Refresh the list
+                            this.populateModelDropdown(UI.newInspectionModelSelect); // Refresh dropdown
+                        } catch (error) {
+                             UI.hideLoading();
+                            UI.showToast(`Erreur suppression: ${error}`, "error");
+                        } finally {
+                             UI.hideModal();
+                        }
+                    },
+                    () => { UI.hideModal(); } // On Cancel
+                );
+            },
+
+            viewModel: async function(modelName) {
+                 UI.showLoading("Chargement du modèle...");
+                try {
+                    const model = await Database.getModel(modelName);
+                    UI.hideLoading();
+                    if (model && model.items) {
+                        let previewHtml = `<h4 class="text-lg font-semibold mb-3">${model.name} (${model.items.length} points)</h4>`;
+                        previewHtml += '<ul class="list-disc pl-5 space-y-2 max-h-96 overflow-y-auto">';
+                        model.items.forEach(item => {
+                            previewHtml += `<li class="text-sm"><span class="font-medium">${item.Categorie} - ${item.PointDeControle}</span> (Type: ${item.TypeParametre})</li>`;
+                        });
+                        previewHtml += '</ul>';
+
+                        UI.showModal(
+                            "Aperçu du Modèle",
+                            previewHtml,
+                            () => UI.hideModal(), // Action on "OK" is just to close
+                            null, // No cancel action needed
+                            "OK", // Confirm button text
+                            "" // No cancel button text (or hide it)
+                        );
+                         // Hide cancel button if only OK is needed
+                         UI.modalCancelButton.style.display = 'none';
+                    } else {
+                        UI.showToast("Modèle introuvable ou vide.", "error");
+                    }
+                } catch (error) {
+                    UI.hideLoading();
+                    UI.showToast(`Erreur affichage modèle: ${error}`, "error");
+                } finally {
+                     // Ensure cancel button is visible again for next modals
+                     UI.modalCancelButton.style.display = 'inline-block';
+                }
+            }
+        };
+
+        // --- inspectionManager.js ---
+        const InspectionManager = {
+            currentInspection: null, // Holds the inspection object being edited
+            currentModel: null, // Holds the model structure for the current inspection
+            autoSaveTimeout: null, // Timeout ID for debouncing auto-save
+
+            init: function() {
+                // Add event listeners specific to inspection management
+                UI.startInspectionButton.addEventListener('click', this.startNewInspection.bind(this));
+                UI.importPackageButton.addEventListener('click', this.handleImportPackage.bind(this));
+            },
+
+            startNewInspection: async function() {
+                const modelName = UI.newInspectionModelSelect.value;
+                const inspectorName = UI.inspectorNameInput.value.trim();
+
+                if (!modelName || !inspectorName) {
+                    UI.showToast("Veuillez sélectionner un modèle et entrer le nom de l'inspecteur.", "warning");
+                    return;
+                }
+
+                 UI.showLoading("Démarrage de l'inspection...");
+                try {
+                    const model = await Database.getModel(modelName);
+                    if (!model) {
+                        throw new Error("Le modèle sélectionné n'a pas pu être chargé.");
+                    }
+
+                    const newInspection = {
+                        id: Utils.generateUniqueId('insp_'),
+                        modelId: model.name, // Store model name as ID link
+                        modelName: model.name, // Also store name for display convenience
+                        inspectorName: inspectorName,
+                        startDate: new Date().toISOString(), // Store as ISO string
+                        endDate: null,
+                        status: 'En cours', // 'En cours', 'Terminée'
+                        results: model.items.map(item => ({ // Initialize results structure
+                            idPoint: item.ID_Point,
+                            result: null, // The actual value (string, number, boolean C/NC)
+                            comment: '',
+                            photosBase64: [], // Array of Base64 strings
+                            isNA: false // Not Applicable flag
+                        }))
+                    };
+
+                    await Database.addOrUpdateInspection(newInspection);
+                     UI.hideLoading();
+                    UI.showToast("Nouvelle inspection démarrée.", "success");
+
+                    // Load the form for the new inspection
+                    this.currentInspection = newInspection;
+                    this.currentModel = model;
+                    UI.displayInspectionForm(this.currentInspection, this.currentModel);
+
+                     // Clear the start form
+                     UI.newInspectionModelSelect.value = '';
+                     UI.inspectorNameInput.value = '';
+                     UI.startInspectionButton.disabled = true;
+                     UI.updateStorageEstimate(); // Update estimate after adding data
+
+                } catch (error) {
+                     UI.hideLoading();
+                    UI.showToast(`Erreur démarrage inspection: ${error.message || error}`, "error");
+                    console.error("Start inspection error:", error);
+                }
+            },
+
+            continueInspection: async function(inspectionId) {
+                 UI.showLoading("Chargement de l'inspection...");
+                 try {
+                     const inspection = await Database.getInspection(inspectionId);
+                     if (!inspection) throw new Error("Inspection introuvable.");
+                     if (inspection.status === 'Terminée') {
+                         UI.showToast("Cette inspection est déjà terminée.", "info");
+                          UI.hideLoading();
+                         return; // Or maybe allow viewing? For now, just block continuation.
+                     }
+
+                     const model = await Database.getModel(inspection.modelId);
+                     if (!model) throw new Error(`Modèle '${inspection.modelId}' associé introuvable.`);
+
+                     this.currentInspection = inspection;
+                     this.currentModel = model;
+                      UI.hideLoading();
+                     UI.displayInspectionForm(this.currentInspection, this.currentModel);
+
+                 } catch (error) {
+                      UI.hideLoading();
+                     UI.showToast(`Erreur chargement inspection: ${error.message || error}`, "error");
+                     console.error("Continue inspection error:", error);
+                     this.currentInspection = null; // Reset state on error
+                     this.currentModel = null;
+                 }
+            },
+
+            loadAndDisplayInspections: async function() {
+                try {
+                    const inspections = await Database.getAllInspections();
+                    UI.displayInspections(inspections);
+                } catch (error) {
+                    UI.showToast(`Erreur chargement inspections: ${error}`, "error");
+                    UI.displayInspections([]); // Display empty state
+                }
+            },
+
+            // --- Auto-save related methods ---
+            scheduleAutoSave: function() {
+                // Debounce: Clear existing timeout and set a new one
+                clearTimeout(this.autoSaveTimeout);
+                this.autoSaveTimeout = setTimeout(() => {
+                    this.performAutoSave();
+                }, 1500); // Auto-save 1.5 seconds after the last change
+            },
+
+            performAutoSave: async function() {
+                if (!this.currentInspection || this.currentInspection.status === 'Terminée') {
+                    return; // Don't save if no inspection is active or if it's finished
+                }
+
+                console.log("Auto-saving inspection:", this.currentInspection.id);
+                 // Optional: Show a subtle saving indicator
+                 // UI.showSavingIndicator();
+                try {
+                    // Only update the results part for efficiency
+                    await Database.updateInspectionResults(this.currentInspection.id, this.currentInspection.results);
+                    console.log("Auto-save successful.");
+                     // UI.hideSavingIndicator(true); // Indicate success
+                     UI.updateStorageEstimate(); // Update estimate after saving data
+                } catch (error) {
+                    console.error("Auto-save failed:", error);
+                    UI.showToast(`Erreur sauvegarde auto: ${error.message || error}`, "error");
+                     // UI.hideSavingIndicator(false); // Indicate failure
+                }
+            },
+
+            // --- Input Handling during Inspection ---
+             handleInputChange: function(pointId, value) {
+                if (!this.currentInspection) return;
+                const resultIndex = this.currentInspection.results.findIndex(r => r.idPoint === pointId);
+                if (resultIndex > -1) {
+                    this.currentInspection.results[resultIndex].result = value;
+                    this.currentInspection.results[resultIndex].isNA = false; // Uncheck N/A if a value is entered
+                    this.scheduleAutoSave();
+                    UI.updateInspectionProgress(this.currentInspection); // Update progress bar
+                     // Uncheck the N/A checkbox visually if needed (though handled by NA change listener too)
+                     const naCheckbox = document.getElementById(`na-checkbox-${pointId}`);
+                     if (naCheckbox && naCheckbox.checked) {
+                         naCheckbox.checked = false;
+                         // Manually trigger the change event handler for NA to update UI state
+                         naCheckbox.dispatchEvent(new Event('change'));
+                     }
+                }
+            },
+
+            handleCommentChange: function(pointId, comment) {
+                if (!this.currentInspection) return;
+                const resultIndex = this.currentInspection.results.findIndex(r => r.idPoint === pointId);
+                if (resultIndex > -1) {
+                    this.currentInspection.results[resultIndex].comment = comment;
+                    this.scheduleAutoSave();
+                }
+            },
+
+             handleNAChange: function(pointId, isNA) {
+                if (!this.currentInspection) return;
+                const resultIndex = this.currentInspection.results.findIndex(r => r.idPoint === pointId);
+                if (resultIndex > -1) {
+                    this.currentInspection.results[resultIndex].isNA = isNA;
+                    if (isNA) {
+                        // Clear result value when N/A is checked
+                        this.currentInspection.results[resultIndex].result = null;
+                    }
+                    this.scheduleAutoSave();
+                    UI.updateInspectionProgress(this.currentInspection); // Update progress bar
+                }
+            },
+
+             handlePhotoAdd: async function(pointId, files, previewContainer) {
+                 if (!this.currentInspection) return;
+                 const resultIndex = this.currentInspection.results.findIndex(r => r.idPoint === pointId);
+                 if (resultIndex === -1) return;
+
+                 UI.showLoading("Traitement des images...");
+                 let saveNeeded = false;
+
+                 for (const file of files) {
+                     if (!file.type.startsWith('image/')) {
+                         UI.showToast(`Le fichier ${file.name} n'est pas une image.`, 'warning');
+                         continue;
+                     }
+
+                     try {
+                         // Check initial size (optional but good UX)
+                         if (file.size > Utils.MAX_IMAGE_SIZE_MB * 1024 * 1024) {
+                              UI.showToast(`L'image ${file.name} est volumineuse (${(file.size / 1024 / 1024).toFixed(1)} Mo), redimensionnement en cours...`, 'info', 5000);
+                         }
+
+                         const base64Data = await Utils.resizeAndEncodeImage(file); // Resize and encode
+                         this.currentInspection.results[resultIndex].photosBase64.push(base64Data);
+                         UI.addPhotoThumbnail(previewContainer, base64Data, this.currentInspection.results[resultIndex].photosBase64.length - 1);
+                         saveNeeded = true;
+
+                     } catch (error) {
+                         console.error("Error processing image:", error);
+                         UI.showToast(`Erreur lors du traitement de l'image ${file.name}.`, 'error');
+                     }
+                 }
+
+                 UI.hideLoading();
+                 if (saveNeeded) {
+                     this.scheduleAutoSave(); // Save changes if any photo was added
+                 }
+            },
+
+             handlePhotoDelete: function(pointId, index, previewContainer) {
+                 if (!this.currentInspection) return;
+                 const resultIndex = this.currentInspection.results.findIndex(r => r.idPoint === pointId);
+                 if (resultIndex > -1 && this.currentInspection.results[resultIndex].photosBase64[index]) {
+                     this.currentInspection.results[resultIndex].photosBase64.splice(index, 1); // Remove from array
+                     UI.removePhotoThumbnail(previewContainer, index); // Remove from UI
+                     this.scheduleAutoSave(); // Save changes
+                 }
+            },
+
+            // --- Finishing Inspection ---
+            confirmFinishInspection: function(inspectionId) {
+                 if (!this.currentInspection || this.currentInspection.id !== inspectionId) return;
+
+                 // Check if all points are addressed (result is not null OR isNA is true)
+                 const progress = this.calculateProgress(this.currentInspection);
+                 let confirmationMessage = `Êtes-vous sûr de vouloir terminer cette inspection ?`;
+                 if (progress.completed < progress.total) {
+                     confirmationMessage += `\n\nAttention : ${progress.total - progress.completed} point(s) ne sont pas encore traités (ni résultat saisi, ni marqué N/A).`;
+                 }
+
+                 UI.showModal(
+                    "Terminer l'Inspection",
+                    confirmationMessage,
+                     async () => { // On Confirm
+                         UI.showLoading("Finalisation de l'inspection...");
+                         try {
+                             this.currentInspection.endDate = new Date().toISOString();
+                             this.currentInspection.status = 'Terminée';
+                             await Database.addOrUpdateInspection(this.currentInspection); // Save final state
+                             UI.hideLoading();
+                             UI.showToast("Inspection terminée avec succès.", "success");
+                             this.currentInspection = null; // Clear current inspection state
+                             this.currentModel = null;
+                             UI.switchView('inspections'); // Go back to the list
+                             UI.updateStorageEstimate(); // Update estimate
+                         } catch (error) {
+                              UI.hideLoading();
+                             UI.showToast(`Erreur lors de la finalisation: ${error.message || error}`, "error");
+                             // Revert status if save failed? Or let user retry? For now, just show error.
+                             // this.currentInspection.endDate = null;
+                             // this.currentInspection.status = 'En cours';
+                         } finally {
+                              UI.hideModal();
+                         }
+                     },
+                     () => { UI.hideModal(); } // On Cancel
+                 );
+            },
+
+             // --- Progress Calculation ---
+            calculateProgress: function(inspection) {
+                if (!inspection || !inspection.results) return { completed: 0, total: 0, percentage: 0 };
+
+                const totalPoints = inspection.results.length;
+                let completedPoints = 0;
+
+                inspection.results.forEach(result => {
+                    // Considered completed if it has a result OR is marked as N/A
+                    const hasResult = result.result !== null && result.result !== undefined && result.result !== '';
+                    if (hasResult || result.isNA) {
+                        completedPoints++;
+                    }
+                });
+
+                const percentage = totalPoints > 0 ? (completedPoints / totalPoints) * 100 : 0;
+                return { completed: completedPoints, total: totalPoints, percentage: percentage };
+            },
+
+             // --- Export / Import ---
+            exportInspection: async function(inspectionId) {
+                 UI.showLoading("Préparation de l'export...");
+                 try {
+                     const inspection = await Database.getInspection(inspectionId);
+                     if (!inspection) throw new Error("Inspection introuvable.");
+
+                     const model = await Database.getModel(inspection.modelId);
+                     if (!model) throw new Error(`Modèle '${inspection.modelId}' associé introuvable. L'export est impossible sans le modèle.`);
+
+                     const { blob, filename } = await Utils.createZipPackage(inspection, model);
+
+                     // Trigger download
+                     const link = document.createElement('a');
+                     link.href = URL.createObjectURL(blob);
+                     link.download = filename;
+                     document.body.appendChild(link);
+                     link.click();
+                     document.body.removeChild(link);
+                     URL.revokeObjectURL(link.href); // Clean up
+
+                      UI.hideLoading(); // Already hidden in createZipPackage on success
+                     UI.showToast(`Inspection exportée: ${filename}`, "success");
+
+                 } catch (error) {
+                      UI.hideLoading();
+                     UI.showToast(`Erreur d'export: ${error.message || error}`, "error");
+                     console.error("Export error:", error);
+                 }
+            },
+
+            handleImportPackage: async function() {
+                const file = UI.importPackageInput.files[0];
+                if (!file) {
+                    UI.showToast("Veuillez sélectionner un fichier ZIP.", "error");
+                    return;
+                }
+
+                UI.showLoading("Lecture du package...");
+                try {
+                    const packageData = await Utils.extractZipPackage(file);
+                    // packageData contains { inspection: {...}, model: {...} }
+
+                    // 1. Handle the Model first
+                    const importedModel = packageData.model;
+                    const existingModel = await Database.getModel(importedModel.name);
+
+                    if (!existingModel) {
+                        // Model doesn't exist, import it directly
+                        await Database.addOrUpdateModel(importedModel);
+                        UI.showToast(`Nouveau modèle "${importedModel.name}" importé depuis le package.`, "info");
+                         ChecklistManager.populateModelDropdown(UI.newInspectionModelSelect); // Update dropdown
+                    } else {
+                        // Optional: Compare existing model with imported one?
+                        // For simplicity, we assume the model in the package is the one to use,
+                        // or that if it exists, it's compatible enough.
+                        // A more robust check could compare item structures.
+                         console.log(`Le modèle "${importedModel.name}" existe déjà localement.`);
+                    }
+
+                    // 2. Handle the Inspection
+                    const importedInspection = packageData.inspection;
+                    const existingInspection = await Database.getInspection(importedInspection.id);
+
+                    if (existingInspection) {
+                         UI.hideLoading(); // Hide before showing modal
+                        // Inspection exists, ask to replace/update
+                        UI.showModal(
+                            "Inspection Existante",
+                            `Une inspection avec l'ID ${importedInspection.id.substring(0, 15)}... (Modèle: ${importedInspection.modelName}) existe déjà. Voulez-vous la remplacer/mettre à jour avec les données du fichier ?`,
+                            async () => { // On Confirm Replace
+                                 UI.showLoading("Mise à jour de l'inspection...");
+                                try {
+                                    // Ensure dates are Date objects if needed, though ISO strings are fine for DB
+                                    // importedInspection.startDate = new Date(importedInspection.startDate);
+                                    // if (importedInspection.endDate) importedInspection.endDate = new Date(importedInspection.endDate);
+
+                                    await Database.addOrUpdateInspection(importedInspection);
+                                    UI.hideLoading();
+                                    UI.showToast("Inspection mise à jour avec succès.", "success");
+                                    this.loadAndDisplayInspections(); // Refresh list
+                                } catch (dbError) {
+                                     UI.hideLoading();
+                                    UI.showToast(`Erreur mise à jour inspection: ${dbError}`, "error");
+                                } finally {
+                                     UI.hideModal();
+                                }
+                            },
+                            () => { // On Cancel Replace
+                                UI.showToast("Mise à jour annulée.", "info");
+                                UI.hideModal();
+                            },
+                            "Remplacer/Mettre à Jour",
+                            "Annuler"
+                        );
+                    } else {
+                        // Inspection doesn't exist, import as new
+                        await Database.addOrUpdateInspection(importedInspection);
+                        UI.hideLoading();
+                        UI.showToast("Nouvelle inspection importée avec succès.", "success");
+                        this.loadAndDisplayInspections(); // Refresh list
+                    }
+                     UI.updateStorageEstimate(); // Update estimate
+
+                } catch (error) {
+                    UI.hideLoading();
+                    UI.showToast(`Erreur d'import: ${error.message || error}`, "error");
+                    console.error("Import package error:", error);
+                } finally {
+                    // Reset file input
+                    UI.importPackageInput.value = null;
+                    UI.importPackageButton.disabled = true;
+                }
+            },
+
+             confirmDeleteInspection: function(inspectionId) {
+                 UI.showModal(
+                    "Confirmer Suppression",
+                    `Êtes-vous sûr de vouloir supprimer cette inspection (${inspectionId.substring(0, 15)}...) ? Cette action est irréversible.`,
+                     async () => { // On Confirm Delete
+                          UI.showLoading("Suppression de l'inspection...");
+                         try {
+                             await Database.deleteInspection(inspectionId);
+                              UI.hideLoading();
+                             UI.showToast("Inspection supprimée.", "success");
+                             this.loadAndDisplayInspections(); // Refresh the list
+                             UI.updateStorageEstimate(); // Update estimate
+                         } catch (error) {
+                              UI.hideLoading();
+                             UI.showToast(`Erreur suppression: ${error}`, "error");
+                         } finally {
+                              UI.hideModal();
+                         }
+                     },
+                     () => { UI.hideModal(); } // On Cancel
+                 );
+            }
+
+        };
+
+
+        // --- main.js ---
+        document.addEventListener('DOMContentLoaded', async () => {
+            UI.showLoading("Initialisation de l'application...");
+            try {
+                await Database.init(); // Initialize IndexedDB
+                UI.init(); // Initialize UI elements and basic listeners
+                ChecklistManager.init(); // Initialize checklist specific listeners
+                InspectionManager.init(); // Initialize inspection specific listeners
+
+                // Load initial data for the default view ('models')
+                await ChecklistManager.loadAndDisplayModels();
+                // Pre-populate dropdown for inspection section even if not visible initially
+                await ChecklistManager.populateModelDropdown(UI.newInspectionModelSelect);
+
+                 UI.hideLoading();
+                UI.showToast("Application prête.", "success", 1500);
+
+            } catch (error) {
+                 UI.hideLoading();
+                console.error("Initialization failed:", error);
+                // Display a critical error message to the user
+                const body = document.querySelector('body');
+                body.innerHTML = `
+                    <div class="min-h-screen flex items-center justify-center bg-red-100">
+                        <div class="bg-white p-8 rounded-lg shadow-lg text-center">
+                            <h1 class="text-2xl font-bold text-red-700 mb-4">Erreur Critique</h1>
+                            <p class="text-gray-700 mb-4">Impossible d'initialiser l'application. La base de données locale (IndexedDB) n'a pas pu être ouverte ou configurée.</p>
+                            <p class="text-sm text-gray-500">Cause possible : Mode de navigation privée, navigateur non supporté, espace disque insuffisant, ou corruption des données.</p>
+                            <p class="text-sm text-gray-500 mt-2">Veuillez essayer de rafraîchir la page ou de quitter le mode de navigation privée.</p>
+                            <pre class="mt-4 text-xs text-left bg-gray-100 p-2 rounded overflow-auto">${error.message || error}</pre>
+                        </div>
+                    </div>`;
+            }
+        });
+
+    </script>
+
+</body>
+</html>
